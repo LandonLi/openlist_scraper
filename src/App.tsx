@@ -550,8 +550,15 @@ export default function App() {
                  ) : (
                    <div className="flex items-center gap-2">
                      <button onClick={toggleSelectAll} className="h-9 px-3 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-600 dark:text-slate-300 rounded-lg text-xs font-bold flex items-center gap-2 border border-slate-200 dark:border-slate-700 transition-all">
-                        <div className={clsx("w-3.5 h-3.5 rounded border flex items-center justify-center", selectedPaths.size > 0 ? "bg-blue-500 border-blue-500" : "border-slate-400")}>
-                            {selectedPaths.size > 0 && <Check className="w-2.5 h-2.5 text-white" />}
+                        <div className={clsx(
+                            "w-3.5 h-3.5 rounded border flex items-center justify-center transition-all", 
+                            selectedPaths.size > 0 ? "bg-blue-500 border-blue-500" : "border-slate-400"
+                        )}>
+                            {selectedPaths.size > 0 && (
+                                selectedPaths.size === fileList.filter(f => !f.isDir).length 
+                                    ? <Check className="w-2.5 h-2.5 text-white" />
+                                    : <Minus className="w-2.5 h-2.5 text-white" />
+                            )}
                         </div>
                         {selectedPaths.size > 0 && selectedPaths.size === fileList.filter(f => !f.isDir).length ? '取消全选' : '全选'}
                      </button>
