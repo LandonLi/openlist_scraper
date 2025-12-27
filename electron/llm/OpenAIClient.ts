@@ -1,5 +1,7 @@
 import OpenAI from 'openai';
 import { ILLMProvider, LLMConfig } from '../interfaces/ILLMProvider';
+import { ProxyHelper } from '../utils/ProxyHelper';
+import fetch from 'node-fetch';
 
 export class OpenAIClient implements ILLMProvider {
   name: string = 'OpenAI';
@@ -7,10 +9,17 @@ export class OpenAIClient implements ILLMProvider {
   private model: string = 'gpt-3.5-turbo';
 
   configure(config: LLMConfig): void {
+    const proxyAgent = config.proxyUrl ? ProxyHelper.createAgent(config.proxyUrl) : undefined;
     this.client = new OpenAI({
       apiKey: config.apiKey,
       baseURL: config.baseURL, // Optional: supports generic OpenAI compatible endpoints
       dangerouslyAllowBrowser: false, // We are in Node.js main process
+      fetch: async (url, init) => {
+        return fetch(url as any, {
+          ...init as any,
+          agent: proxyAgent,
+        }) as unknown as Promise<Response>;
+      },
     });
     this.model = config.model || 'gpt-3.5-turbo';
   }
@@ -41,9 +50,9 @@ export class OpenAIClient implements ILLMProvider {
 
     const completion = await this.client.chat.completions.create({
       messages: [
-        { 
-          role: 'system', 
-          content: 'You are a helpful assistant that extracts media information from filenames. Output strictly in JSON format.' 
+        {
+          role: 'system',
+          content: 'You are a helpful assistant that extracts media information from filenames. Output strictly in JSON format.'
         },
         { role: 'user', content: prompt }
       ],

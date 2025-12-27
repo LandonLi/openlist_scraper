@@ -14,6 +14,7 @@ import { LLMEngine } from './matchers/LLMEngine';
 import { OpenAIClient } from './llm/OpenAIClient';
 import { MetadataFactory } from './metadata/factory';
 import { SourceFactory } from './sources/factory';
+import { FetchClient } from './utils/FetchClient';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -42,6 +43,7 @@ function registerIpcHandlers() {
     store.set(key, value);
     if (key === 'proxy_url') {
       if (win) value ? await win.webContents.session.setProxy({ proxyRules: value as string }) : await win.webContents.session.setProxy({});
+      if (scannerService) scannerService.setProxy(value as string);
     }
     if (key === 'log_level' && scannerService) {
       scannerService.setLogLevel(value as any);
@@ -59,8 +61,9 @@ function registerIpcHandlers() {
 
   ipcMain.handle('tmdb:test', async (_, token) => {
     try {
-      const { default: axios } = await import('axios');
-      const response = await axios.get('https://api.themoviedb.org/3/authentication', {
+      const proxyUrl = store.get('proxy_url') as string;
+      const client = FetchClient.create({ proxyUrl, timeout: 5000 });
+      const response = await client.get('https://api.themoviedb.org/3/authentication', {
         headers: { Authorization: `Bearer ${token}`, Accept: 'application/json' }
       });
       return { success: response.data?.success };
@@ -69,19 +72,20 @@ function registerIpcHandlers() {
 
   ipcMain.handle('proxy:test', async () => {
     try {
-      const { default: axios } = await import('axios');
-      await axios.get('https://www.gstatic.com/generate_204', { timeout: 5000 });
+      const proxyUrl = store.get('proxy_url') as string;
+      const client = FetchClient.create({ proxyUrl, timeout: 5000 });
+      await client.get('https://www.gstatic.com/generate_204');
       return { success: true };
     } catch (e: any) { return { success: false, error: e.message }; }
   });
 
   ipcMain.handle('openlist:test', async (_, config) => {
     try {
-      const { default: axios } = await import('axios');
+      const proxyUrl = store.get('proxy_url') as string;
+      const client = FetchClient.create({ proxyUrl, timeout: 5000 });
       const baseURL = config.url.replace(/\/$/, '');
-      const response = await axios.get(`${baseURL}/api/me`, {
-        headers: { 'Authorization': config.token },
-        timeout: 5000
+      const response = await client.get(`${baseURL}/api/me`, {
+        headers: { 'Authorization': config.token }
       });
       return { success: response.status === 200 && response.data?.code === 200 };
     } catch (e: any) { return { success: false, error: e.response?.data?.message || e.message }; }
@@ -98,10 +102,11 @@ function registerIpcHandlers() {
         return { success: true, data, currentPath: fullPath };
       }
       else if (type === 'openlist') {
-        const { default: axios } = await import('axios');
+        const proxyUrl = store.get('proxy_url') as string;
+        const client = FetchClient.create({ proxyUrl });
         const baseURL = config.openListUrl.replace(/\/$/, '');
         const reqPath = targetPath || '/';
-        const response = await axios.post(`${baseURL}/api/fs/list`, { path: reqPath, password: "", page: 1, per_page: 0, refresh: true }, { headers: { 'Authorization': config.openListToken } });
+        const response = await client.post(`${baseURL}/api/fs/list`, { path: reqPath, password: "", page: 1, per_page: 0, refresh: true }, { headers: { 'Authorization': config.openListToken } });
         if (response.data.code !== 200) return { success: false, error: response.data.message };
         const content = response.data.data.content || [];
         const items = content.map((item: any) => ({ name: item.name, path: path.posix.join(reqPath, item.name), isDir: item.is_dir, size: item.size }));
@@ -132,10 +137,14 @@ function registerIpcHandlers() {
       const currentOpenaiKey = store.get('openai_api_key') as string || '';
       const currentOpenaiBase = store.get('openai_base_url') as string || '';
       const currentOpenaiModel = store.get('openai_model') as string || '';
+      const currentProxyUrl = store.get('proxy_url') as string || '';
 
-      llmClient.configure({ apiKey: currentOpenaiKey, baseURL: currentOpenaiBase, model: currentOpenaiModel });
+      llmClient.configure({ apiKey: currentOpenaiKey, baseURL: currentOpenaiBase, model: currentOpenaiModel, proxyUrl: currentProxyUrl });
       const newMetadataProvider = MetadataFactory.create('tmdb', { apiKey: currentTmdbKey });
+      if ('setProxy' in newMetadataProvider) (newMetadataProvider as any).setProxy(currentProxyUrl);
+
       scannerService.setMetadataProvider(newMetadataProvider);
+      scannerService.setProxy(currentProxyUrl);
 
       const videoExtensions = store.get('video_extensions') as string || 'mkv,mp4,avi,mov,iso,rmvb';
       scannerService.scanSource(source, sourceConfig.path, videoExtensions).catch(err => console.error('Scan Error:', err));
@@ -253,6 +262,10 @@ app.whenReady().then(() => {
 
   const savedLogLevel = store.get('log_level') as string || 'info';
   scannerService.setLogLevel(savedLogLevel as any);
+
+  const savedProxyUrl = store.get('proxy_url') as string || '';
+  scannerService.setProxy(savedProxyUrl);
+  if (metadataProvider.setProxy) (metadataProvider as any).setProxy(savedProxyUrl);
 
   if (process.platform === 'win32') {
     app.setAppUserModelId('com.openlist.scraper');

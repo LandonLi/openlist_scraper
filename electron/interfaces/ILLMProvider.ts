@@ -1,7 +1,8 @@
 export interface LLMConfig {
   apiKey: string;
   baseURL?: string;
-  model: string;
+  model?: string;
+  proxyUrl?: string;
 }
 
 export interface ILLMProvider {

@@ -1,15 +1,16 @@
-import axios, { AxiosInstance } from 'axios';
+import { FetchClient } from '../utils/FetchClient';
 import { IMetadataProvider, SearchResult, EpisodeData } from '../interfaces/IMetadataProvider';
+import { ProxyHelper } from '../utils/ProxyHelper';
 
 export class TMDBProvider implements IMetadataProvider {
   name: string = 'TMDB';
   private apiKey: string;
-  private api: AxiosInstance;
+  private api: FetchClient;
   private imageBaseUrl: string = 'https://image.tmdb.org/t/p/w500';
 
   constructor(apiKey: string) {
     this.apiKey = apiKey;
-    this.api = axios.create({
+    this.api = FetchClient.create({
       baseURL: 'https://api.themoviedb.org/3',
       headers: {
         'Authorization': `Bearer ${this.apiKey}`,
@@ -21,7 +22,9 @@ export class TMDBProvider implements IMetadataProvider {
     });
 
     // Add request interceptor for logging
+    // Add request interceptor for logging
     this.api.interceptors.request.use(config => {
+      // @ts-ignore
       this.logDebug(`Request: ${config.method?.toUpperCase()} ${config.url}`, config.params);
       return config;
     });
@@ -31,7 +34,7 @@ export class TMDBProvider implements IMetadataProvider {
       return response;
     }, error => {
       this.logDebug(`Response Error: ${error.message}`, error.response?.data);
-      return Promise.reject(error);
+      throw error;
     });
   }
 
@@ -39,6 +42,16 @@ export class TMDBProvider implements IMetadataProvider {
 
   setDebugLogger(logger: (message: string) => void) {
     this.debugLogger = logger;
+  }
+
+  setProxy(proxyUrl: string) {
+    const proxyUrlStr = ProxyHelper.parseProxyUrl(proxyUrl);
+    if (proxyUrlStr) {
+      this.api.defaults.proxyUrl = proxyUrlStr;
+      this.logDebug(`Proxy enabled: ${proxyUrlStr}`);
+    } else {
+      delete this.api.defaults.proxyUrl;
+    }
   }
 
   private logDebug(msg: string, data?: any) {
@@ -110,9 +123,10 @@ export class TMDBProvider implements IMetadataProvider {
         stillPath: data.still_path ? `${this.imageBaseUrl}${data.still_path}` : undefined,
         runtime: data.runtime,
       };
-    } catch (error) {
+    } catch (error: any) {
       // 404 is expected if episode doesn't exist
-      if (axios.isAxiosError(error) && error.response?.status === 404) {
+      // 404 is expected if episode doesn't exist
+      if (FetchClient.isFetchError(error) && error.response?.status === 404) {
         return null;
       }
       console.error('TMDB Episode Details Error:', error);

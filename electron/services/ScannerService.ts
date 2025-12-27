@@ -5,7 +5,8 @@ import { IMetadataProvider } from '../interfaces/IMetadataProvider';
 import { DatabaseService } from './DatabaseService';
 import { BrowserWindow, ipcMain } from 'electron';
 import path from 'path';
-import axios from 'axios';
+import fetch from 'node-fetch';
+import { HttpsProxyAgent } from 'https-proxy-agent';
 
 export class ScannerService {
   private regexEngine: RegexEngine;
@@ -16,6 +17,7 @@ export class ScannerService {
 
   private showMetadataCache: Map<string, { id: string, poster?: string }> = new Map();
   private logLevel: 'info' | 'warn' | 'error' | 'debug' = 'info';
+  private proxyUrl: string = '';
 
   constructor(
     regexEngine: RegexEngine,
@@ -39,7 +41,7 @@ export class ScannerService {
   setMetadataProvider(provider: IMetadataProvider) {
     this.metadataProvider = provider;
     if (this.logLevel === 'debug' && typeof (this.metadataProvider as any).setDebugLogger === 'function') {
-      (this.metadataProvider as any).setDebugLogger((msg: string) => this.debug(`[Metadata] ${msg}`));
+      (this.metadataProvider as any).setDebugLogger((msg: string) => this.debug(`[Metadata] ${msg} `));
     }
   }
 
@@ -48,14 +50,22 @@ export class ScannerService {
     // Update dependencies if they support logging injection
     if (this.logLevel === 'debug') {
       if (typeof (this.metadataProvider as any).setDebugLogger === 'function') {
-        (this.metadataProvider as any).setDebugLogger((msg: string) => this.debug(`[Metadata] ${msg}`));
+        (this.metadataProvider as any).setDebugLogger((msg: string) => this.debug(`[Metadata] ${msg} `));
       }
       if (typeof (this.llmEngine as any).setDebugLogger === 'function') {
-        (this.llmEngine as any).setDebugLogger((msg: string) => this.debug(`[LLM] ${msg}`));
+        (this.llmEngine as any).setDebugLogger((msg: string) => this.debug(`[LLM] ${msg} `));
       }
     } else {
       // Optional: Clear loggers if we want to stop receiving them, 
       // but simpler to just filter them out in this.debug()
+    }
+  }
+
+  setProxy(proxyUrl: string) {
+    this.proxyUrl = proxyUrl;
+    // Also update metadata provider if it supports it
+    if (this.metadataProvider && typeof (this.metadataProvider as any).setProxy === 'function') {
+      (this.metadataProvider as any).setProxy(proxyUrl);
     }
   }
 
@@ -66,15 +76,15 @@ export class ScannerService {
     const msgLevelScore = levels[type] ?? 1;
 
     if (msgLevelScore >= currentLevelScore) {
-      console.log(`[Scanner] [${type.toUpperCase()}] ${message}`);
+      console.log(`[Scanner][${type.toUpperCase()}] ${message} `);
       this.mainWindow?.webContents.send('scanner-log', { message, type });
     }
   }
 
   public debug(message: string, data?: any) {
     if (this.logLevel !== 'debug') return;
-    const suffix = data ? `\nData: ${JSON.stringify(data, null, 2)}` : '';
-    this.log(`${message}${suffix}`, 'debug');
+    const suffix = data ? `\nData: ${JSON.stringify(data, null, 2)} ` : '';
+    this.log(`${message}${suffix} `, 'debug');
   }
 
   private async requestUserConfirmation(detectedName: string, results: any[]): Promise<{ id: string, poster?: string } | null> {
@@ -102,8 +112,19 @@ export class ScannerService {
 
   private async downloadImage(url: string): Promise<Buffer | null> {
     try {
-      const response = await axios.get(url, { responseType: 'arraybuffer' });
-      return Buffer.from(response.data);
+      const config: any = {};
+      if (this.proxyUrl) {
+        try {
+          config.agent = new HttpsProxyAgent(this.proxyUrl);
+        } catch (e) {
+          // ignore invalid proxy
+        }
+      }
+      const response = await fetch(url, config);
+      if (response.ok) {
+        return Buffer.from(await response.arrayBuffer());
+      }
+      return null;
     } catch (e) { return null; }
   }
 
@@ -118,21 +139,21 @@ export class ScannerService {
           results = results.concat(subItems);
         }
       }
-    } catch (e: any) { this.log(`Error listing dir ${dirPath}: ${e.message}`, 'error'); }
+    } catch (e: any) { this.log(`Error listing dir ${dirPath}: ${e.message} `, 'error'); }
     return results;
   }
 
   async identifySingleFile(source: IMediaSource, targetPath: string, videoExtensions: string) {
     if (this._isScanning) return;
     this._isScanning = true;
-    this.log(`正在识别上下文: ${targetPath}`);
+    this.log(`正在识别上下文: ${targetPath} `);
 
     try {
       const dirPath = path.posix.dirname(targetPath);
       const allFiles = await source.listDir(dirPath);
 
       const extPattern = videoExtensions.split(',').map(e => e.trim()).filter(e => e).join('|');
-      const videoRegex = new RegExp(`\.(${extPattern})$`, 'i');
+      const videoRegex = new RegExp(`\.(${extPattern}) $`, 'i');
       const videoFiles = allFiles.filter(f => !f.isDir && videoRegex.test(f.name));
 
       this.log(`上下文: 找到 ${videoFiles.length} 个同级视频文件。`);
@@ -171,7 +192,7 @@ export class ScannerService {
       await this.processSeriesGroup(source, resolveResult.seriesName, items);
 
     } catch (e: any) {
-      this.log(`识别失败: ${e.message}`, 'error');
+      this.log(`识别失败: ${e.message} `, 'error');
     } finally {
       this._isScanning = false;
       this.mainWindow?.webContents.send('scanner-finished');
@@ -236,7 +257,7 @@ export class ScannerService {
       for (const item of itemsToProcess) {
         if (item.metadata) {
           const fileExt = path.posix.extname(item.file.name);
-          const newName = `${seriesName} - S${String(item.match.season).padStart(2, '0')}E${String(item.match.episode).padStart(2, '0')} - ${item.metadata.title}${fileExt}`;
+          const newName = `${seriesName} - S${String(item.match.season).padStart(2, '0')}E${String(item.match.episode).padStart(2, '0')} - ${item.metadata.title}${fileExt} `;
           if (item.file.name !== newName) renameObjects.push({ src_name: item.file.name, new_name: newName });
         }
       }
@@ -262,15 +283,15 @@ export class ScannerService {
 
       if (options.writeNfo && item.metadata) {
         sendProgress(`写入 NFO: 第 ${item.match.episode} 集`);
-        const nfoContent = `<?xml version="1.0" encoding="UTF-8" standalone="yes" ?>
-<episodedetails>
-  <title>${item.metadata.title}</title>
-  <season>${item.match.season}</season>
-  <episode>${item.match.episode}</episode>
-  <plot>${item.metadata.overview}</plot>
-  <aired>${item.metadata.airDate || ''}</aired>
-  <runtime>${item.metadata.runtime || ''}</runtime>
-</episodedetails>`;
+        const nfoContent = `<? xml version = "1.0" encoding = "UTF-8" standalone = "yes" ?>
+  <episodedetails>
+  <title>${item.metadata.title} </title>
+    < season > ${item.match.season} </season>
+      < episode > ${item.match.episode} </episode>
+        < plot > ${item.metadata.overview} </plot>
+          < aired > ${item.metadata.airDate || ''} </aired>
+            < runtime > ${item.metadata.runtime || ''} </runtime>
+              </episodedetails>`;
         await source.writeFile(path.posix.join(fileDir, `${finalBaseName}.nfo`), nfoContent);
         currentStep++;
       }

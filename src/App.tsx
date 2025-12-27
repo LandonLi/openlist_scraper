@@ -449,7 +449,14 @@ export default function App() {
     setSelectedEpisodeDetail({ ...item.metadata, season: item.match.season, episode: item.match.episode });
     try {
       const fullData = await window.ipcRenderer.invoke('metadata:getEpisodeDetail', { showId: item.tmdbId, season: item.match.season, episode: item.match.episode });
-      if (fullData) setSelectedEpisodeDetail({ ...fullData, season: item.match.season, episode: item.match.episode });
+      if (fullData) {
+        setSelectedEpisodeDetail({
+          ...fullData,
+          season: item.match.season,
+          episode: item.match.episode,
+          overview: fullData.overview || item.metadata.overview || item.match.overview // Fallback to existing overview
+        });
+      }
     } catch (e) { console.error(e); } finally { setLoadingDetail(false); }
   };
 
