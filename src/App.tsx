@@ -557,7 +557,7 @@ export default function App() {
               </div>
 
               <div className="flex-1 h-9 bg-slate-50 dark:bg-slate-800 rounded-lg flex items-center px-2 border border-slate-200 dark:border-slate-700 text-sm shadow-sm overflow-hidden">
-                <div className="flex-1 flex items-center overflow-x-auto scrollbar-hide mask-linear-fade">
+                <div className="flex-1 flex items-center overflow-x-auto breadcrumb-scroll mask-linear-fade">
                   {isConfigured && (
                     <button
                       onClick={() => handleNavigate(sourceType === 'local' ? localPath : '')}
