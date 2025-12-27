@@ -2,7 +2,7 @@
 
 **OpenList Scraper** 是一款现代化的本地媒体文件整理与元数据刮削工具。它专为影视爱好者设计，能够自动扫描本地或远程 (OpenList) 目录，智能识别剧集信息，刮削 TMDB 元数据，并批量执行重命名、生成 NFO 和下载海报等操作。
 
-![App Screenshot](public/app-icon.png)
+![App Screenshot](public/app-screenshot.png)
 
 ## ✨ 主要功能
 
