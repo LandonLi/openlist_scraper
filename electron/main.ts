@@ -193,11 +193,17 @@ function registerIpcHandlers() {
   ipcMain.handle('rules:get', async () => {
     const defaultPath = path.join(process.env.DIST_ELECTRON || '', 'resources/default_rules.json');
     const userPath = path.join(app.getPath('userData'), 'custom_rules.json');
-    let rules = [];
+
+    let rules: any[] = [];
     if (await fs.pathExists(defaultPath)) rules = await fs.readJSON(defaultPath);
+
     if (await fs.pathExists(userPath)) {
       const userRules = await fs.readJSON(userPath);
-      rules = [...userRules, ...rules];
+      // Deduplicate by ID: User rules take precedence
+      const ruleMap = new Map();
+      rules.forEach(r => ruleMap.set(r.id, r));
+      userRules.forEach((r: any) => ruleMap.set(r.id, r));
+      rules = Array.from(ruleMap.values());
     }
     return rules;
   });
