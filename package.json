@@ -8,7 +8,8 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "tsc && vite build && electron-builder",
+    "clean": "node -e \"['dist', 'dist-electron', 'release'].forEach(d => { if (require('fs').existsSync(d)) require('fs').rmSync(d, { recursive: true, force: true }) })\"",
+    "build": "npm run clean && tsc && vite build && electron-builder",
     "lint": "eslint . --ext ts,tsx --report-unused-disable-directives --max-warnings 0",
     "preview": "vite preview"
   },

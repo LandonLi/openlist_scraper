@@ -22,9 +22,9 @@ const __dirname = path.dirname(__filename);
 app.setName('OpenListScraper'); 
 
 process.env.DIST_ELECTRON = path.join(__dirname, '..');
-process.env.DIST = path.join(process.env.DIST_ELECTRON, '../dist');
+process.env.DIST = path.join(process.env.DIST_ELECTRON, 'dist');
 process.env.PUBLIC = process.env.VITE_DEV_SERVER_URL
-  ? path.join(process.env.DIST_ELECTRON, '../public')
+  ? path.join(process.env.DIST_ELECTRON, 'public')
   : process.env.DIST;
 
 let win: BrowserWindow | null = null;
