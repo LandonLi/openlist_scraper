@@ -56,6 +56,7 @@ export class TMDBProvider implements IMetadataProvider {
         overview: data.overview,
         airDate: data.air_date,
         stillPath: data.still_path ? `${this.imageBaseUrl}${data.still_path}` : undefined,
+        runtime: data.runtime,
       }));
     } catch (error) {
       console.error('TMDB Season Details Error:', error);
@@ -80,6 +81,7 @@ export class TMDBProvider implements IMetadataProvider {
         overview: data.overview,
         airDate: data.air_date,
         stillPath: data.still_path ? `${this.imageBaseUrl}${data.still_path}` : undefined,
+        runtime: data.runtime,
       };
     } catch (error) {
       // 404 is expected if episode doesn't exist

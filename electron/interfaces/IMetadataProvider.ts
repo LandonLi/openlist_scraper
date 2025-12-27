@@ -16,6 +16,7 @@ export interface EpisodeData {
   overview?: string;
   airDate?: string;
   stillPath?: string;
+  runtime?: number;
 }
 
 export interface IMetadataProvider {

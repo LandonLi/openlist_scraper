@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useAppStore } from './stores/appStore';
-import { Settings, Database, Globe, Play, Eye, EyeOff, CheckCircle2, AlertCircle, RefreshCw, Save, ArrowRight, Minus, Square, X, Folder, Network, Zap, File, Clapperboard, ChevronUp, ChevronDown, LayoutGrid, List, Wand2, Sun, Moon, ArrowLeft, CornerLeftUp, Check } from 'lucide-react';
+import { Settings, Database, Globe, Play, Eye, EyeOff, CheckCircle2, AlertCircle, RefreshCw, Save, ArrowRight, Minus, Square, X, Folder, Network, Zap, File, Clapperboard, ChevronUp, ChevronDown, LayoutGrid, List, Wand2, Sun, Moon, ArrowLeft, CornerLeftUp, Check, Calendar, Clock } from 'lucide-react';
 import clsx from 'clsx';
 
 const StatusMessage = ({ result }: { result: { success: boolean; message: string } | null }) => {
@@ -958,9 +958,25 @@ export default function App() {
       {selectedEpisodeDetail && (
         <div className="fixed inset-0 z-[300] flex items-center justify-center bg-slate-950/80 backdrop-blur-md p-6">
           <div className="bg-white dark:bg-slate-900 w-full max-w-3xl rounded-3xl overflow-hidden shadow-2xl">
-            {selectedEpisodeDetail.stillPath && <div className="relative h-64"><img src={selectedEpisodeDetail.stillPath} className="w-full h-full object-cover" alt="" /><button onClick={() => setSelectedEpisodeDetail(null)} className="absolute top-4 right-4 p-2 bg-black/20 text-white rounded-full"><X className="w-5 h-5" /></button></div>}
+            {selectedEpisodeDetail.stillPath && <div className="relative h-64"><img src={selectedEpisodeDetail.stillPath} className="w-full h-full object-cover" alt="" /></div>}
             <div className="p-8">
                 <h3 className="text-2xl font-black">{selectedEpisodeDetail.title} (S{selectedEpisodeDetail.season}E{selectedEpisodeDetail.episode})</h3>
+                
+                <div className="flex items-center gap-6 mt-3 text-xs font-bold text-slate-400 uppercase tracking-wider">
+                  {selectedEpisodeDetail.airDate && (
+                    <div className="flex items-center gap-2">
+                      <Calendar className="w-3.5 h-3.5 text-blue-500" />
+                      {selectedEpisodeDetail.airDate}
+                    </div>
+                  )}
+                  {selectedEpisodeDetail.runtime !== undefined && selectedEpisodeDetail.runtime !== null && (
+                    <div className="flex items-center gap-2">
+                      <Clock className="w-3.5 h-3.5 text-amber-500" />
+                      {selectedEpisodeDetail.runtime} 分钟
+                    </div>
+                  )}
+                </div>
+
                 <p className="mt-4 text-sm text-slate-600 dark:text-slate-300 whitespace-pre-wrap leading-relaxed">{selectedEpisodeDetail.overview || "暂无简介。"}</p>
                 <div className="mt-6 pt-6 border-t border-slate-100 flex justify-end"><button onClick={() => setSelectedEpisodeDetail(null)} className="px-6 py-2 bg-slate-100 dark:bg-slate-800 rounded-xl font-bold text-xs">关闭</button></div>
             </div>

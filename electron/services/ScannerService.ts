@@ -235,6 +235,8 @@ export class ScannerService {
   <season>${item.match.season}</season>
   <episode>${item.match.episode}</episode>
   <plot>${item.metadata.overview}</plot>
+  <aired>${item.metadata.airDate || ''}</aired>
+  <runtime>${item.metadata.runtime || ''}</runtime>
 </episodedetails>`;
                     await source.writeFile(path.posix.join(fileDir, `${finalBaseName}.nfo`), nfoContent);
                     currentStep++;
