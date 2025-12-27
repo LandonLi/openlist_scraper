@@ -4,7 +4,7 @@
   "description": "一款现代化的媒体文件整理与元数据刮削工具",
   "author": "Landon Li",
   "private": true,
-  "version": "1.0.0",
+  "version": "1.1.0",
   "type": "module",
   "scripts": {
     "dev": "vite",

@@ -96,4 +96,4 @@ npm run build
 本项目采用 MIT 许可证。详见 LICENSE 文件。
 
 ---
-© 2025 Landon Li. 版本 V1.0.0
+© 2025 Landon Li. 版本 V1.1.0

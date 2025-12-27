@@ -509,7 +509,7 @@ export default function App() {
         <div className="px-3 flex items-center gap-2 text-[11px] font-bold text-slate-500 tracking-wider uppercase">
           <Clapperboard className="w-3.5 h-3.5 text-blue-500" />
           <span>OpenList 媒体整理</span>
-          <span className="ml-1 px-1.5 py-0.5 rounded bg-slate-100 dark:bg-slate-800 text-[9px] font-black text-slate-400 dark:text-slate-500 tracking-normal">V1.0.0</span>
+          <span className="ml-1 px-1.5 py-0.5 rounded bg-slate-100 dark:bg-slate-800 text-[9px] font-black text-slate-400 dark:text-slate-500 tracking-normal">V1.1.0</span>
         </div>
 
         <div className="flex h-full items-center" style={{ WebkitAppRegion: 'no-drag' } as any}>
@@ -912,7 +912,7 @@ export default function App() {
             </div>
             <div className="p-6 border-t border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 flex justify-between items-center">
               <div className="text-[10px] text-slate-400 font-medium">
-                OpenList Scraper &bull; 版本 1.0.0 &bull; © 2025 Landon Li
+                OpenList Scraper &bull; 版本 1.1.0 &bull; © 2025 Landon Li
               </div>
               <button onClick={handleSaveConfig} disabled={saveStatus === 'saving'} className="bg-blue-600 hover:bg-blue-500 text-white px-8 py-2.5 rounded-xl font-bold text-sm shadow-lg shadow-blue-500/30 flex items-center gap-2 transition-all">{saveStatus === 'saving' ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}{saveStatus === 'saved' ? '设置已保存！' : '保存设置'}</button>
             </div>
