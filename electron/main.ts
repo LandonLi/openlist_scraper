@@ -19,7 +19,7 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 // 1. MUST set name before everything else to stabilize userData directory
-app.setName('OpenListScraper'); 
+app.setName('OpenListScraper');
 
 process.env.DIST_ELECTRON = path.join(__dirname, '..');
 process.env.DIST = path.join(process.env.DIST_ELECTRON, 'dist');
@@ -41,7 +41,10 @@ function registerIpcHandlers() {
   ipcMain.handle('config:set', async (_, key, value) => {
     store.set(key, value);
     if (key === 'proxy_url') {
-       if (win) value ? await win.webContents.session.setProxy({ proxyRules: value as string }) : await win.webContents.session.setProxy({});
+      if (win) value ? await win.webContents.session.setProxy({ proxyRules: value as string }) : await win.webContents.session.setProxy({});
+    }
+    if (key === 'log_level' && scannerService) {
+      scannerService.setLogLevel(value as any);
     }
   });
 
@@ -93,7 +96,7 @@ function registerIpcHandlers() {
         const data = items.map(item => ({ name: item.name, path: path.join(fullPath, item.name), isDir: item.isDirectory(), size: 0 }));
         data.sort((a, b) => (a.isDir === b.isDir ? a.name.localeCompare(b.name) : a.isDir ? -1 : 1));
         return { success: true, data, currentPath: fullPath };
-      } 
+      }
       else if (type === 'openlist') {
         const { default: axios } = await import('axios');
         const baseURL = config.openListUrl.replace(/\/$/, '');
@@ -124,7 +127,7 @@ function registerIpcHandlers() {
       const source = SourceFactory.create(sourceConfig.type, sourceConfig.id, 'Source');
       const connected = await source.connect(sourceConfig);
       if (!connected) return { success: false, error: '连接失败' };
-      
+
       const currentTmdbKey = store.get('tmdb_api_key') as string || '';
       const currentOpenaiKey = store.get('openai_api_key') as string || '';
       const currentOpenaiBase = store.get('openai_base_url') as string || '';
@@ -145,7 +148,7 @@ function registerIpcHandlers() {
       const source = SourceFactory.create(sourceConfig.type, sourceConfig.id, 'Source');
       const connected = await source.connect(sourceConfig);
       if (!connected) return { success: false, error: '连接失败' };
-      
+
       const currentTmdbKey = store.get('tmdb_api_key') as string || '';
       const currentOpenaiKey = store.get('openai_api_key') as string || '';
       const currentOpenaiBase = store.get('openai_base_url') as string || '';
@@ -166,7 +169,7 @@ function registerIpcHandlers() {
       const source = SourceFactory.create(sourceConfig.type, sourceConfig.id, 'Source');
       const connected = await source.connect(sourceConfig);
       if (!connected) return { success: false, error: '连接失败' };
-      
+
       const currentTmdbKey = store.get('tmdb_api_key') as string || '';
       const currentOpenaiKey = store.get('openai_api_key') as string || '';
       const currentOpenaiBase = store.get('openai_base_url') as string || '';
@@ -193,8 +196,8 @@ function registerIpcHandlers() {
     let rules = [];
     if (await fs.pathExists(defaultPath)) rules = await fs.readJSON(defaultPath);
     if (await fs.pathExists(userPath)) {
-        const userRules = await fs.readJSON(userPath);
-        rules = [...userRules, ...rules];
+      const userRules = await fs.readJSON(userPath);
+      rules = [...userRules, ...rules];
     }
     return rules;
   });
@@ -210,7 +213,7 @@ function createWindow() {
   const iconPng = path.join(process.env.PUBLIC || '', 'app-icon.png');
   const iconSvg = path.join(process.env.PUBLIC || '', 'app-icon.svg');
   const iconPath = fs.existsSync(iconPng) ? iconPng : iconSvg;
-  
+
   win = new BrowserWindow({
     title: 'OpenList Scraper',
     icon: iconPath,
@@ -230,22 +233,25 @@ function createWindow() {
 app.whenReady().then(() => {
   // 2. Initialize store AFTER app name is set
   store = new ElectronStore({ name: 'settings' });
-  
+
   // 3. Initialize all services
   dbService = new DatabaseService();
   regexEngine = new RegexEngine(path.join(process.env.DIST_ELECTRON || '', 'resources/default_rules.json'));
   llmClient = new OpenAIClient();
   llmEngine = new LLMEngine(llmClient);
-  
+
   const tmdbKeyInitial = store.get('tmdb_api_key') as string || '';
   metadataProvider = MetadataFactory.create('tmdb', { apiKey: tmdbKeyInitial });
-  
+
   scannerService = new ScannerService(regexEngine, llmEngine, metadataProvider, dbService);
+
+  const savedLogLevel = store.get('log_level') as string || 'info';
+  scannerService.setLogLevel(savedLogLevel as any);
 
   if (process.platform === 'win32') {
     app.setAppUserModelId('com.openlist.scraper');
   }
-  
+
   registerIpcHandlers();
   createWindow();
 });

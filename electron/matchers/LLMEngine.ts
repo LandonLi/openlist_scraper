@@ -9,9 +9,22 @@ export class LLMEngine implements IMatcher {
     this.llm = llmProvider;
   }
 
+  private debugLogger?: (msg: string) => void;
+
+  setDebugLogger(logger: (message: string) => void) {
+    this.debugLogger = logger;
+  }
+
+  private logDebug(msg: string, data?: any) {
+    if (this.debugLogger) {
+      const dataStr = data ? `\nData: ${JSON.stringify(data, null, 2)}` : '';
+      this.debugLogger(`${msg}${dataStr}`);
+    }
+  }
+
   async matchEpisodeFromList(filename: string, episodeList: any[]): Promise<number | null> {
     const listStr = episodeList.map(e => `E${e.episodeNumber}: ${e.title} (${e.overview?.substring(0, 50)}...)`).join('\n');
-    
+
     const prompt = `
       Match the following filename to the most likely episode from the provided list.
       Filename: "${filename}"
@@ -24,11 +37,11 @@ export class LLMEngine implements IMatcher {
       - reason: string (Briefly why it matches)
     `;
 
-    console.log(`[LLM-Fuzzy] Sending prompt:\n${prompt}`);
+    this.logDebug(`[Fuzzy] Sending prompt:\n${prompt}`);
 
     try {
       const result = await this.llm.generateJson<{ episodeNumber?: number, reason?: string }>(prompt);
-      console.log(`[LLM-Fuzzy] Result:`, result);
+      this.logDebug(`[Fuzzy] Result:`, result);
       return result.episodeNumber ?? null;
     } catch (e) {
       console.error('LLM List Match Error:', e);
@@ -55,11 +68,13 @@ export class LLMEngine implements IMatcher {
     `;
 
     try {
+      this.logDebug(`[ResolveDirectory] Prompting for ${dirPath}`, { filenames });
       const result = await this.llm.generateJson<{
         seriesName?: string;
         season?: number;
         matches: Array<{ filename: string, episode: number }>;
       }>(prompt);
+      this.logDebug(`[ResolveDirectory] Result`, result);
       return result;
     } catch (e) {
       console.error('LLM Directory Resolve Error:', e);
@@ -69,7 +84,7 @@ export class LLMEngine implements IMatcher {
 
   async match(filename: string): Promise<MatchResult> {
     const cleanName = path.basename(filename);
-    
+
     const prompt = `
       Analyze the following filename and extract metadata.
       Filename: "${cleanName}"
@@ -85,6 +100,7 @@ export class LLMEngine implements IMatcher {
     `;
 
     try {
+      this.logDebug(`[Match] Prompting for ${cleanName}`);
       const result = await this.llm.generateJson<{
         seriesName?: string;
         season?: number;
@@ -93,6 +109,7 @@ export class LLMEngine implements IMatcher {
         type?: string;
         error?: string;
       }>(prompt);
+      this.logDebug(`[Match] Result`, result);
 
       if (result.error || !result.seriesName) {
         return {

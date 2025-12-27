@@ -19,13 +19,40 @@ export class TMDBProvider implements IMetadataProvider {
         language: 'zh-CN', // Default to Chinese
       },
     });
+
+    // Add request interceptor for logging
+    this.api.interceptors.request.use(config => {
+      this.logDebug(`Request: ${config.method?.toUpperCase()} ${config.url}`, config.params);
+      return config;
+    });
+
+    this.api.interceptors.response.use(response => {
+      this.logDebug(`Response: ${response.status} ${response.config.url}`, { data: response.data });
+      return response;
+    }, error => {
+      this.logDebug(`Response Error: ${error.message}`, error.response?.data);
+      return Promise.reject(error);
+    });
+  }
+
+  private debugLogger?: (msg: string) => void;
+
+  setDebugLogger(logger: (message: string) => void) {
+    this.debugLogger = logger;
+  }
+
+  private logDebug(msg: string, data?: any) {
+    if (this.debugLogger) {
+      const dataStr = data ? `\nData: ${JSON.stringify(data, null, 2)}` : '';
+      this.debugLogger(`${msg}${dataStr}`);
+    }
   }
 
   async searchTVShow(query: string): Promise<SearchResult[]> {
     try {
       // Clean query: remove trailing hyphens and extra spaces
       const cleanQuery = query.replace(/[-\s]+$/, '').trim();
-      
+
       const response = await this.api.get('/search/tv', {
         params: { query: cleanQuery },
       });
@@ -67,9 +94,9 @@ export class TMDBProvider implements IMetadataProvider {
   async getEpisodeDetails(showId: string, season: number, episode: number): Promise<EpisodeData | null> {
     try {
       const response = await this.api.get(`/tv/${showId}/season/${season}/episode/${episode}`, {
-          params: {
-              append_to_response: 'credits,images' // Optional: add more details for the "detailed view"
-          }
+        params: {
+          append_to_response: 'credits,images' // Optional: add more details for the "detailed view"
+        }
       });
       const data = response.data;
 

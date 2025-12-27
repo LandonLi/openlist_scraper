@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
-import { useAppStore } from './stores/appStore';
-import { Settings, Database, Globe, Play, Eye, EyeOff, CheckCircle2, AlertCircle, RefreshCw, Save, ArrowRight, Minus, Square, X, Folder, Network, Zap, File, Clapperboard, ChevronUp, ChevronDown, LayoutGrid, List, Wand2, Sun, Moon, ArrowLeft, CornerLeftUp, Check, Calendar, Clock } from 'lucide-react';
+import { useAppStore, LogType } from './stores/appStore';
+import { Settings, Database, Globe, Play, Eye, EyeOff, CheckCircle2, AlertCircle, RefreshCw, Save, ArrowRight, Minus, Square, X, Folder, Network, Zap, File, Clapperboard, ChevronUp, ChevronDown, LayoutGrid, List, Wand2, Sun, Moon, ArrowLeft, CornerLeftUp, Check, Calendar, Clock, Trash2 } from 'lucide-react';
 import clsx from 'clsx';
 
 const StatusMessage = ({ result }: { result: { success: boolean; message: string } | null }) => {
@@ -14,8 +14,8 @@ const StatusMessage = ({ result }: { result: { success: boolean; message: string
 };
 
 const TestButton = ({ onClick, loading, label = "测试连接" }: { onClick: () => void, loading: boolean, label?: string }) => (
-  <button 
-    onClick={onClick} 
+  <button
+    onClick={onClick}
     disabled={loading}
     className="h-9 px-4 rounded-lg bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-600 dark:text-slate-300 text-xs font-bold transition-all flex items-center gap-2 border border-slate-200 dark:border-slate-700 disabled:opacity-50"
   >
@@ -24,24 +24,88 @@ const TestButton = ({ onClick, loading, label = "测试连接" }: { onClick: () 
   </button>
 );
 
+const LogItem = ({ log }: { log: { message: string, type: LogType, timestamp: number } }) => {
+  const [expanded, setExpanded] = useState(false);
+  const isLong = log.message.length > 300 || log.message.split('\n').length > 5;
+  const showContent = expanded || !isLong ? log.message : log.message.substring(0, 300) + '...';
+
+  return (
+    <div
+      className={clsx(
+        "flex gap-2 group p-1.5 rounded-md transition-all border border-transparent hover:shadow-sm relative",
+        "hover:bg-white dark:hover:bg-slate-800 hover:border-slate-100 dark:hover:border-slate-700"
+      )}
+    >
+      <span className="text-slate-400/50 text-[10px] shrink-0 font-mono py-0.5 pointer-events-none select-none">
+        {new Date(log.timestamp).toLocaleTimeString()}
+      </span>
+
+      <span className={clsx(
+        "text-[9px] px-1 py-0.5 rounded font-black uppercase tracking-wider shrink-0 w-12 text-center select-none flex items-center justify-center h-fit mt-0.5",
+        log.type === 'debug' && "bg-slate-100 dark:bg-slate-800 text-slate-400",
+        log.type === 'info' && "bg-blue-50 dark:bg-blue-900/20 text-blue-500",
+        log.type === 'success' && "bg-emerald-50 dark:bg-emerald-900/20 text-emerald-500",
+        log.type === 'warn' && "bg-amber-50 dark:bg-amber-900/20 text-amber-500",
+        log.type === 'error' && "bg-rose-50 dark:bg-rose-900/20 text-rose-500",
+      )}>
+        {log.type}
+      </span>
+
+      <div className="flex-1 min-w-0 flex flex-col gap-1">
+        <span
+          className={clsx(
+            "break-all text-xs leading-relaxed font-medium font-sans cursor-pointer hover:opacity-80 active:scale-[0.99] transition-transform origin-left",
+            log.type === 'debug' && "text-slate-400 font-mono text-[10px]",
+            log.type === 'info' && "text-slate-600 dark:text-slate-300",
+            log.type === 'success' && "text-emerald-600 dark:text-emerald-400",
+            log.type === 'warn' && "text-amber-600 dark:text-amber-400",
+            log.type === 'error' && "text-rose-600 dark:text-rose-400"
+          )}
+          onClick={() => navigator.clipboard.writeText(log.message)}
+          title="点击复制内容"
+        >
+          {log.type === 'debug' ? (
+            <span className="whitespace-pre-wrap">{showContent}</span>
+          ) : showContent}
+        </span>
+
+        {isLong && (
+          <div className={clsx("flex justify-start", expanded && "sticky bottom-0 left-0 w-full pt-2 pb-1 bg-gradient-to-t from-white dark:from-slate-900 to-transparent z-10")}>
+            <button
+              onClick={(e) => { e.stopPropagation(); setExpanded(!expanded); }}
+              className={clsx(
+                "text-[10px] font-bold text-slate-400 hover:text-blue-500 flex items-center gap-1 bg-slate-100 dark:bg-slate-800 px-2 py-1 rounded-full hover:bg-blue-50 dark:hover:bg-blue-900/30 transition-colors shadow-sm",
+                expanded && "shadow-md border border-slate-200 dark:border-slate-700"
+              )}
+            >
+              {expanded ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
+              {expanded ? '收起' : '展开'}
+            </button>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+};
+
 export default function App() {
-  const { 
+  const {
     tmdbKey, openaiKey, openaiBaseUrl, openaiModel,
     sourceType, localPath, openListUrl, openListToken,
     logs, isScanning,
-    setConfig, setVideoExtensions, addLog, setScanning, setMedia 
+    setConfig, setVideoExtensions, addLog, clearLogs, setScanning, setMedia
   } = useAppStore();
 
   // Navigation & UI Tabs
   const [activeTab, setActiveTab] = useState<'dashboard' | 'settings'>('dashboard');
   const [settingsTab, setSettingsTab] = useState<'general' | 'metadata' | 'llm' | 'library' | 'rules'>('general');
-  
+
   // Explorer
   const [currentPath, setCurrentPath] = useState('');
   const [fileList, setFileList] = useState<Array<{ name: string, path: string, isDir: boolean, size: number }>>([]);
   const [loadingFiles, setLoadingFiles] = useState(false);
   const [navHistory, setNavHistory] = useState<string[]>([]);
-  
+
   // Selection State (Multi-select)
   const [selectedPaths, setSelectedPaths] = useState<Set<string>>(new Set());
 
@@ -51,7 +115,7 @@ export default function App() {
   const [showOpenListToken, setShowOpenListToken] = useState(false);
   const [saveStatus, setSaveStatus] = useState<'idle' | 'saving' | 'saved'>('idle');
   const [rules, setRules] = useState<Array<{ id: string, pattern: string, type: string }>>([]);
-  
+
   const [isTestingLLM, setIsTestingLLM] = useState(false);
   const [llmTestResult, setLlmTestResult] = useState<{ success: boolean; message: string } | null>(null);
   const [availableModels, setAvailableModels] = useState<string[]>([]);
@@ -68,7 +132,7 @@ export default function App() {
   const [scrapeProgress, setScrapeProgress] = useState<{ percent: number, message: string }>({ percent: 0, message: '' });
   const [selectedIndices, setSelectedIndices] = useState<number[]>([]);
   const [batchOptions, setBatchOptions] = useState({ rename: true, writeNfo: true, writePoster: true, writeStill: true });
-  
+
   const [selectedEpisodeDetail, setSelectedEpisodeDetail] = useState<any | null>(null);
   const [, setLoadingDetail] = useState(false);
   const [editingMatchIndex, setEditingMatchIndex] = useState<number | null>(null);
@@ -80,7 +144,7 @@ export default function App() {
   const [openListUrlInput, setOpenListUrlInput] = useState('');
   const [openListTokenInput, setOpenListTokenInput] = useState('');
   const [videoExtsInput, setVideoExtsInput] = useState('');
-  
+
   // General Settings
   const [theme, setTheme] = useState<'dark' | 'light'>('dark');
   const [logLevel, setLogLevel] = useState<'info' | 'warn' | 'error'>('info');
@@ -107,7 +171,7 @@ export default function App() {
         const savedBatchOptions = await window.ipcRenderer.invoke('config:get', 'batch_options');
         const savedTheme = await window.ipcRenderer.invoke('config:get', 'theme');
         const savedLogLevel = await window.ipcRenderer.invoke('config:get', 'log_level');
-        
+
         if (tKey) setConfig('tmdbKey', tKey);
         if (oKey) setConfig('openaiKey', oKey);
         if (oUrl) setConfig('openaiBaseUrl', oUrl);
@@ -123,7 +187,7 @@ export default function App() {
         if (savedBatchOptions) setBatchOptions(savedBatchOptions);
         if (savedTheme) setTheme(savedTheme);
         if (savedLogLevel) setLogLevel(savedLogLevel);
-        
+
         const initialRules = await window.ipcRenderer.invoke('rules:get') || [];
         setRules(Array.isArray(initialRules) ? initialRules : []);
         refreshMedia();
@@ -134,22 +198,22 @@ export default function App() {
 
     const handleLog = (data: any) => addLog(data.message, data.type);
     const handleFinished = () => {
-        setScanning(false);
-        addLog('扫描任务全部完成。', 'success');
-        refreshMedia();
+      setScanning(false);
+      addLog('扫描任务全部完成。', 'success');
+      refreshMedia();
     };
     const handleConfirmation = (data: any) => {
-        setWizardData({ detectedName: data.detectedName, seriesResults: data.results });
-        setWizardWizardStage('series');
+      setWizardData({ detectedName: data.detectedName, seriesResults: data.results });
+      setWizardWizardStage('series');
     };
     const handleEpisodesConfirmation = (data: any) => {
-        setWizardData(prev => ({ ...prev, seriesName: data.seriesName, matches: data.matches }));
-        setSelectedIndices(data.matches.map((_: any, i: number) => i));
-        setWizardWizardStage('episodes');
+      setWizardData(prev => ({ ...prev, seriesName: data.seriesName, matches: data.matches }));
+      setSelectedIndices(data.matches.map((_: any, i: number) => i));
+      setWizardWizardStage('episodes');
     };
     const handleProgress = (data: any) => {
-        setScrapeProgress({ percent: data.percent, message: data.message });
-        if (data.finished) setWizardWizardStage('finished');
+      setScrapeProgress({ percent: data.percent, message: data.message });
+      if (data.finished) setWizardWizardStage('finished');
     };
 
     const cleanupLog = window.ipcRenderer.on('scanner-log', handleLog);
@@ -157,14 +221,14 @@ export default function App() {
     const cleanupConf = window.ipcRenderer.on('scanner-require-confirmation', handleConfirmation);
     const cleanupEpConf = window.ipcRenderer.on('scanner-require-episodes-confirmation', handleEpisodesConfirmation);
     const cleanupProgress = window.ipcRenderer.on('scanner-operation-progress', handleProgress);
-    
+
     loadConfig();
     return () => {
-        if (typeof cleanupLog === 'function') (cleanupLog as any)();
-        if (typeof cleanupFinished === 'function') (cleanupFinished as any)();
-        if (typeof cleanupConf === 'function') (cleanupConf as any)();
-        if (typeof cleanupEpConf === 'function') (cleanupEpConf as any)();
-        if (typeof cleanupProgress === 'function') (cleanupProgress as any)();
+      if (typeof cleanupLog === 'function') (cleanupLog as any)();
+      if (typeof cleanupFinished === 'function') (cleanupFinished as any)();
+      if (typeof cleanupConf === 'function') (cleanupConf as any)();
+      if (typeof cleanupEpConf === 'function') (cleanupEpConf as any)();
+      if (typeof cleanupProgress === 'function') (cleanupProgress as any)();
     };
   }, []);
 
@@ -181,63 +245,63 @@ export default function App() {
   // Handlers
   const handleConfirmSeries = (seriesId: string | null) => {
     window.ipcRenderer.send('scanner-confirm-response', { seriesId });
-    if (!seriesId) { setWizardWizardStage('idle'); setWizardData({}); } 
+    if (!seriesId) { setWizardWizardStage('idle'); setWizardData({}); }
     else { setWizardWizardStage('loading_episodes'); }
   };
 
   const handleConfirmEpisodes = (confirmed: boolean) => {
     if (!confirmed) {
-        window.ipcRenderer.send('scanner-episodes-confirm-response', { confirmed: false, options: {}, selectedIndices: [] });
-        setWizardWizardStage('idle'); setWizardData({});
+      window.ipcRenderer.send('scanner-episodes-confirm-response', { confirmed: false, options: {}, selectedIndices: [] });
+      setWizardWizardStage('idle'); setWizardData({});
     } else {
-        setWizardWizardStage('executing');
-        setScrapeProgress({ percent: 0, message: '正在初始化操作...' });
-        window.ipcRenderer.send('scanner-episodes-confirm-response', { confirmed: true, options: batchOptions, selectedIndices: selectedIndices, updatedMatches: wizardData.matches });
+      setWizardWizardStage('executing');
+      setScrapeProgress({ percent: 0, message: '正在初始化操作...' });
+      window.ipcRenderer.send('scanner-episodes-confirm-response', { confirmed: true, options: batchOptions, selectedIndices: selectedIndices, updatedMatches: wizardData.matches });
     }
   };
 
   const closeWizard = () => {
     if (wizardStage === 'series') {
-        window.ipcRenderer.send('scanner-confirm-response', { seriesId: null });
+      window.ipcRenderer.send('scanner-confirm-response', { seriesId: null });
     }
     if (wizardStage === 'episodes') {
-        window.ipcRenderer.send('scanner-episodes-confirm-response', { confirmed: false, options: {}, selectedIndices: [] });
+      window.ipcRenderer.send('scanner-episodes-confirm-response', { confirmed: false, options: {}, selectedIndices: [] });
     }
-    
-    setWizardWizardStage('idle'); 
-    setWizardData({}); 
+
+    setWizardWizardStage('idle');
+    setWizardData({});
     setScrapeProgress({ percent: 0, message: '' });
-    
+
     if (wizardStage === 'finished') {
-        setScanning(false);
+      setScanning(false);
     }
   };
 
   const handleManualMatchUpdate = async () => {
     if (editingMatchIndex === null || !wizardData.matches) return;
-    
+
     const item = wizardData.matches[editingMatchIndex];
     const newMatches = [...wizardData.matches];
-    
+
     newMatches[editingMatchIndex] = {
       ...item,
       match: { ...item.match, season: editMatchValues.season, episode: editMatchValues.episode }
     };
-    
+
     setWizardData(prev => ({ ...prev, matches: newMatches }));
     setEditingMatchIndex(null);
 
     try {
-      const metadata = await window.ipcRenderer.invoke('metadata:getEpisodeDetail', { 
-        showId: item.tmdbId, 
-        season: editMatchValues.season, 
-        episode: editMatchValues.episode 
+      const metadata = await window.ipcRenderer.invoke('metadata:getEpisodeDetail', {
+        showId: item.tmdbId,
+        season: editMatchValues.season,
+        episode: editMatchValues.episode
       });
       if (metadata) {
         const updatedMatchesWithMeta = [...newMatches];
         updatedMatchesWithMeta[editingMatchIndex] = {
-            ...updatedMatchesWithMeta[editingMatchIndex],
-            metadata: metadata
+          ...updatedMatchesWithMeta[editingMatchIndex],
+          metadata: metadata
         };
         setWizardData(prev => ({ ...prev, matches: updatedMatchesWithMeta }));
       }
@@ -253,14 +317,14 @@ export default function App() {
   const loadDirectory = async (path: string, options?: { isBack?: boolean }) => {
     setLoadingFiles(true);
     setFileList([]);
-    setSelectedPaths(new Set()); 
-    
+    setSelectedPaths(new Set());
+
     if (!options?.isBack && currentPath) {
-        setNavHistory(prev => [...prev, currentPath]);
+      setNavHistory(prev => [...prev, currentPath]);
     }
 
     const result = await window.ipcRenderer.invoke('explorer:list', { type: sourceType, path, config: { localPath, openListUrl, openListToken } });
-    if (result.success) { setFileList(result.data); setCurrentPath(result.currentPath); } 
+    if (result.success) { setFileList(result.data); setCurrentPath(result.currentPath); }
     else { addLog(`无法加载目录: ${result.error}`, 'error'); }
     setLoadingFiles(false);
   };
@@ -284,15 +348,15 @@ export default function App() {
     setScanning(true);
 
     if (selectedPaths.size > 0) {
-        const paths = Array.from(selectedPaths);
-        addLog(`正在为 ${paths.length} 个选定项目开始匹配...`, 'info');
-        const res = await window.ipcRenderer.invoke('scanner:scan-selected', { type: sourceType, id: `src_${Date.now()}`, paths, url: openListUrl, token: openListToken });
-        if (!res.success) { addLog(res.error, 'error'); setScanning(false); }
+      const paths = Array.from(selectedPaths);
+      addLog(`正在为 ${paths.length} 个选定项目开始匹配...`, 'info');
+      const res = await window.ipcRenderer.invoke('scanner:scan-selected', { type: sourceType, id: `src_${Date.now()}`, paths, url: openListUrl, token: openListToken });
+      if (!res.success) { addLog(res.error, 'error'); setScanning(false); }
     } else {
-        if (!currentPath) return;
-        addLog(`开始递归扫描目录: ${currentPath}`, 'info');
-        const res = await window.ipcRenderer.invoke('scanner:start', { type: sourceType, id: `src_${Date.now()}`, path: currentPath, url: openListUrl, token: openListToken });
-        if (!res.success) { addLog(res.error, 'error'); setScanning(false); }
+      if (!currentPath) return;
+      addLog(`开始递归扫描目录: ${currentPath}`, 'info');
+      const res = await window.ipcRenderer.invoke('scanner:start', { type: sourceType, id: `src_${Date.now()}`, path: currentPath, url: openListUrl, token: openListToken });
+      if (!res.success) { addLog(res.error, 'error'); setScanning(false); }
     }
   };
 
@@ -311,7 +375,7 @@ export default function App() {
     await window.ipcRenderer.invoke('config:set', 'theme', theme);
     await window.ipcRenderer.invoke('config:set', 'log_level', logLevel);
     await window.ipcRenderer.invoke('rules:save', rules);
-    
+
     setConfig('proxyUrl', proxyInput); setConfig('localPath', localPathInput);
     setConfig('openListUrl', openListUrlInput); setConfig('openListToken', openListTokenInput);
     setVideoExtensions(videoExtsInput);
@@ -349,16 +413,16 @@ export default function App() {
 
   const toggleOption = (id: 'rename' | 'writeNfo' | 'writePoster' | 'writeStill') => {
     setBatchOptions(prev => {
-        const next = { ...prev, [id]: !prev[id] };
-        window.ipcRenderer.invoke('config:set', 'batch_options', next);
-        return next;
+      const next = { ...prev, [id]: !prev[id] };
+      window.ipcRenderer.invoke('config:set', 'batch_options', next);
+      return next;
     });
   };
 
   const handleTestLLM = async () => {
     setIsTestingLLM(true); setLlmTestResult(null);
     const res = await window.ipcRenderer.invoke('llm:test', { apiKey: openaiKey, baseURL: openaiBaseUrl });
-    if (res.success) { setAvailableModels(res.models); setLlmTestResult({ success: true, message: `连接成功! 获取到 ${res.models.length} 个模型。` }); } 
+    if (res.success) { setAvailableModels(res.models); setLlmTestResult({ success: true, message: `连接成功! 获取到 ${res.models.length} 个模型。` }); }
     else setLlmTestResult({ success: false, message: res.error });
     setIsTestingLLM(false);
   };
@@ -382,10 +446,10 @@ export default function App() {
   const handleShowEpisodeDetail = async (item: any) => {
     if (!item.metadata || !item.tmdbId) return;
     setLoadingDetail(true);
-    setSelectedEpisodeDetail({ ...item.metadata, season: item.match.season, episode: item.match.episode }); 
+    setSelectedEpisodeDetail({ ...item.metadata, season: item.match.season, episode: item.match.episode });
     try {
-        const fullData = await window.ipcRenderer.invoke('metadata:getEpisodeDetail', { showId: item.tmdbId, season: item.match.season, episode: item.match.episode });
-        if (fullData) setSelectedEpisodeDetail({ ...fullData, season: item.match.season, episode: item.match.episode });
+      const fullData = await window.ipcRenderer.invoke('metadata:getEpisodeDetail', { showId: item.tmdbId, season: item.match.season, episode: item.match.episode });
+      if (fullData) setSelectedEpisodeDetail({ ...fullData, season: item.match.season, episode: item.match.episode });
     } catch (e) { console.error(e); } finally { setLoadingDetail(false); }
   };
 
@@ -399,13 +463,13 @@ export default function App() {
   const toggleSelectAll = () => {
     const filesCount = fileList.filter(f => !f.isDir).length;
     if (selectedPaths.size === filesCount && selectedPaths.size > 0) {
-        setSelectedPaths(new Set());
+      setSelectedPaths(new Set());
     } else {
-        const newSet = new Set<string>();
-        fileList.forEach(f => {
-            if (!f.isDir) newSet.add(f.path);
-        });
-        setSelectedPaths(newSet);
+      const newSet = new Set<string>();
+      fileList.forEach(f => {
+        if (!f.isDir) newSet.add(f.path);
+      });
+      setSelectedPaths(newSet);
     }
   };
 
@@ -425,8 +489,8 @@ export default function App() {
 
   useEffect(() => {
     if (activeTab === 'dashboard' && !isScanning) {
-      if ((sourceType === 'local' && localPath) || (sourceType === 'openlist' && openListUrl)) { 
-        loadDirectory(currentPath || (sourceType === 'local' ? localPath : '')); 
+      if ((sourceType === 'local' && localPath) || (sourceType === 'openlist' && openListUrl)) {
+        loadDirectory(currentPath || (sourceType === 'local' ? localPath : ''));
       }
     }
   }, [activeTab, sourceType, localPath, openListUrl, isScanning]);
@@ -436,13 +500,13 @@ export default function App() {
       {/* Title Bar */}
       <div className="fixed top-0 left-0 right-0 h-8 z-[100] flex items-center justify-between bg-white dark:bg-slate-900 border-b border-slate-200 dark:border-slate-800 select-none" style={{ WebkitAppRegion: 'drag' } as any}>
         <div className="px-3 flex items-center gap-2 text-[11px] font-bold text-slate-500 tracking-wider uppercase">
-          <Clapperboard className="w-3.5 h-3.5 text-blue-500" /> 
+          <Clapperboard className="w-3.5 h-3.5 text-blue-500" />
           <span>OpenList 媒体整理</span>
           <span className="ml-1 px-1.5 py-0.5 rounded bg-slate-100 dark:bg-slate-800 text-[9px] font-black text-slate-400 dark:text-slate-500 tracking-normal">V1.0.0</span>
         </div>
 
         <div className="flex h-full items-center" style={{ WebkitAppRegion: 'no-drag' } as any}>
-          <button 
+          <button
             onClick={() => setActiveTab(activeTab === 'settings' ? 'dashboard' : 'settings')}
             className={clsx(
               "h-full px-3 flex items-center gap-2 transition-colors",
@@ -465,210 +529,212 @@ export default function App() {
           <div className="flex-1 flex flex-col min-h-0 bg-white dark:bg-slate-950">
             {/* Toolbar / Address Bar */}
             <div className="h-14 border-b border-slate-200 dark:border-slate-800 flex items-center px-4 gap-2 bg-white dark:bg-slate-900 shrink-0">
-               {/* Nav Buttons */}
-               <div className="flex items-center gap-1 shrink-0">
-                  <button 
-                    onClick={handleGoBack} 
-                    disabled={navHistory.length === 0}
-                    className="p-2 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-md disabled:opacity-20 transition-colors"
-                    title="返回"
-                  >
-                    <ArrowLeft className="w-4 h-4 text-slate-600 dark:text-slate-300" />
-                  </button>
-                  <button 
-                    onClick={handleGoUp} 
-                    disabled={!currentPath || currentPath === '/' || currentPath === localPath}
-                    className="p-2 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-md disabled:opacity-20 transition-colors"
-                    title="上一级"
-                  >
-                    <CornerLeftUp className="w-4 h-4 text-slate-600 dark:text-slate-300" />
-                  </button>
-               </div>
-               
-               <div className="flex-1 h-9 bg-slate-50 dark:bg-slate-800 rounded-lg flex items-center px-2 border border-slate-200 dark:border-slate-700 text-sm shadow-sm overflow-hidden">
-                  <div className="flex-1 flex items-center overflow-x-auto scrollbar-hide mask-linear-fade">
-                    {isConfigured && (
-                        <button 
-                            onClick={() => handleNavigate(sourceType === 'local' ? localPath : '')}
+              {/* Nav Buttons */}
+              <div className="flex items-center gap-1 shrink-0">
+                <button
+                  onClick={handleGoBack}
+                  disabled={navHistory.length === 0}
+                  className="p-2 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-md disabled:opacity-20 transition-colors"
+                  title="返回"
+                >
+                  <ArrowLeft className="w-4 h-4 text-slate-600 dark:text-slate-300" />
+                </button>
+                <button
+                  onClick={handleGoUp}
+                  disabled={!currentPath || currentPath === '/' || currentPath === localPath}
+                  className="p-2 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-md disabled:opacity-20 transition-colors"
+                  title="上一级"
+                >
+                  <CornerLeftUp className="w-4 h-4 text-slate-600 dark:text-slate-300" />
+                </button>
+              </div>
+
+              <div className="flex-1 h-9 bg-slate-50 dark:bg-slate-800 rounded-lg flex items-center px-2 border border-slate-200 dark:border-slate-700 text-sm shadow-sm overflow-hidden">
+                <div className="flex-1 flex items-center overflow-x-auto scrollbar-hide mask-linear-fade">
+                  {isConfigured && (
+                    <button
+                      onClick={() => handleNavigate(sourceType === 'local' ? localPath : '')}
+                      className={clsx(
+                        "px-1.5 py-0.5 rounded-md hover:bg-white dark:hover:bg-slate-700 hover:shadow-sm transition-all whitespace-nowrap border border-transparent hover:border-slate-200 dark:hover:border-slate-600 flex items-center gap-1",
+                        (!currentPath || currentPath === '/' || currentPath === localPath) ? "font-bold text-slate-800 dark:text-slate-100 cursor-default" : "text-slate-500 hover:text-blue-600"
+                      )}
+                      disabled={!currentPath || currentPath === '/' || currentPath === localPath}
+                    >
+                      <Database className="w-3.5 h-3.5" />
+                      <span>根目录</span>
+                    </button>
+                  )}
+                  {currentPath && currentPath !== '/' && currentPath !== localPath ? (
+                    currentPath.replace(localPath, '').split(/[\\/]/).filter(Boolean).map((part, index, arr) => {
+                      const isLast = index === arr.length - 1;
+                      return (
+                        <div key={index} className="flex items-center text-xs">
+                          <span className="text-slate-300 dark:text-slate-600 mx-0.5">/</span>
+                          <button
+                            onClick={() => {
+                              const sep = currentPath.includes('\\') ? '\\' : '/';
+                              let parts = currentPath.split(sep).filter(Boolean);
+                              const partIndex = parts.lastIndexOf(part);
+                              let newPath = parts.slice(0, partIndex + 1).join(sep);
+                              if (sep === '\\' && newPath.length === 2 && newPath.endsWith(':')) newPath += '\\';
+                              if (sep === '/' && !newPath.startsWith('/')) newPath = '/' + newPath;
+                              handleNavigate(newPath);
+                            }}
                             className={clsx(
-                                "px-1.5 py-0.5 rounded-md hover:bg-white dark:hover:bg-slate-700 hover:shadow-sm transition-all whitespace-nowrap border border-transparent hover:border-slate-200 dark:hover:border-slate-600 flex items-center gap-1",
-                                (!currentPath || currentPath === '/' || currentPath === localPath) ? "font-bold text-slate-800 dark:text-slate-100 cursor-default" : "text-slate-500 hover:text-blue-600"
+                              "px-1.5 py-0.5 rounded-md hover:bg-white dark:hover:bg-slate-700 hover:shadow-sm transition-all whitespace-nowrap border border-transparent hover:border-slate-200 dark:hover:border-slate-600",
+                              isLast ? "font-bold text-slate-800 dark:text-slate-100 cursor-default" : "text-slate-500 hover:text-blue-600"
                             )}
-                            disabled={!currentPath || currentPath === '/' || currentPath === localPath}
-                        >
-                            <Database className="w-3.5 h-3.5" />
-                            <span>根目录</span>
-                        </button>
-                    )}
-                    {currentPath && currentPath !== '/' && currentPath !== localPath ? (
-                        currentPath.replace(localPath, '').split(/[\\/]/).filter(Boolean).map((part, index, arr) => {
-                            const isLast = index === arr.length - 1;
-                            return (
-                                <div key={index} className="flex items-center text-xs">
-                                    <span className="text-slate-300 dark:text-slate-600 mx-0.5">/</span>
-                                    <button 
-                                        onClick={() => {
-                                            const sep = currentPath.includes('\\') ? '\\' : '/';
-                                            let parts = currentPath.split(sep).filter(Boolean);
-                                            const partIndex = parts.lastIndexOf(part);
-                                            let newPath = parts.slice(0, partIndex + 1).join(sep);
-                                            if (sep === '\\' && newPath.length === 2 && newPath.endsWith(':')) newPath += '\\';
-                                            if (sep === '/' && !newPath.startsWith('/')) newPath = '/' + newPath;
-                                            handleNavigate(newPath);
-                                        }}
-                                        className={clsx(
-                                            "px-1.5 py-0.5 rounded-md hover:bg-white dark:hover:bg-slate-700 hover:shadow-sm transition-all whitespace-nowrap border border-transparent hover:border-slate-200 dark:hover:border-slate-600",
-                                            isLast ? "font-bold text-slate-800 dark:text-slate-100 cursor-default" : "text-slate-500 hover:text-blue-600"
-                                        )}
-                                        disabled={isLast}
-                                    >
-                                        {part}
-                                    </button>
-                                </div>
-                            );
-                        })
-                    ) : (
-                        !isConfigured && <span className="text-slate-400 italic px-2">未配置</span>
-                    )}
-                  </div>
-               </div>
-
-               <div className="flex items-center gap-2">
-                 <div className="flex bg-slate-100 dark:bg-slate-800 rounded-lg p-1 border border-slate-200 dark:border-slate-700 h-9">
-                    <button onClick={() => { setViewMode('grid'); window.ipcRenderer.invoke('config:set', 'view_mode', 'grid'); }} className={clsx("p-1.5 rounded-md transition-all", viewMode === 'grid' ? "bg-white dark:bg-slate-700 text-blue-600 shadow-sm" : "text-slate-400 hover:text-slate-600 dark:hover:text-slate-200")}>
-                        <LayoutGrid className="w-4 h-4" />
-                    </button>
-                    <button onClick={() => { setViewMode('list'); window.ipcRenderer.invoke('config:set', 'view_mode', 'list'); }} className={clsx("p-1.5 rounded-md transition-all", viewMode === 'list' ? "bg-white dark:bg-slate-700 text-blue-600 shadow-sm" : "text-slate-400 hover:text-slate-600 dark:hover:text-slate-200")}>
-                        <List className="w-4 h-4" />
-                    </button>
-                 </div>
-
-                 {!isConfigured ? (
-                   <button onClick={() => { setActiveTab('settings'); setSettingsTab('library'); }} className="h-9 px-4 bg-blue-600 hover:bg-blue-500 text-white rounded-lg text-xs font-bold flex items-center gap-2 shadow-sm transition-all shadow-blue-500/20">
-                      配置数据源 <ArrowRight className="w-3 h-3" />
-                   </button>
-                 ) : (
-                   <div className="flex items-center gap-2">
-                     <button onClick={toggleSelectAll} className="h-9 px-3 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-600 dark:text-slate-300 rounded-lg text-xs font-bold flex items-center gap-2 border border-slate-200 dark:border-slate-700 transition-all">
-                        <div className={clsx(
-                            "w-3.5 h-3.5 rounded border flex items-center justify-center transition-all", 
-                            selectedPaths.size > 0 ? "bg-blue-500 border-blue-500" : "border-slate-400"
-                        )}>
-                            {selectedPaths.size > 0 && (
-                                selectedPaths.size === fileList.filter(f => !f.isDir).length 
-                                    ? <Check className="w-2.5 h-2.5 text-white" />
-                                    : <Minus className="w-2.5 h-2.5 text-white" />
-                            )}
+                            disabled={isLast}
+                          >
+                            {part}
+                          </button>
                         </div>
-                        {selectedPaths.size > 0 && selectedPaths.size === fileList.filter(f => !f.isDir).length ? '取消全选' : '全选'}
-                     </button>
-                     
-                     <button onClick={handleStartScan} disabled={isScanning || (!currentPath && selectedPaths.size === 0)} className={clsx("h-9 px-4 rounded-lg text-xs font-bold flex items-center gap-2 transition-all", isScanning || (!currentPath && selectedPaths.size === 0) ? "bg-slate-100 dark:bg-slate-800 text-slate-400 border border-slate-200 dark:border-slate-700" : "bg-blue-600 hover:bg-blue-500 text-white shadow-lg shadow-blue-500/20")}>
-                       {isScanning ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <Wand2 className="w-3.5 h-3.5 fill-current" />}
-                       {isScanning ? '扫描中...' : (selectedPaths.size > 0 ? `匹配选中 (${selectedPaths.size})` : '扫描目录')}
-                     </button>
-                   </div>
-                 )}
-               </div>
-            </div>
-            
-            <div className="flex-1 flex flex-col min-h-0">
-               <div className="flex-1 overflow-y-auto p-4 bg-slate-50/50 dark:bg-slate-950/50">
-                 {loadingFiles ? (
-                    <div className="flex flex-col items-center justify-center h-full text-slate-400 gap-3">
-                        <RefreshCw className="w-8 h-8 animate-spin opacity-50" /> 
-                        <span className="text-xs font-medium uppercase tracking-widest">正在加载目录...</span>
-                    </div>
-                 ) : (
-                    <div className={clsx(
-                        viewMode === 'grid' 
-                            ? "grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-3" 
-                            : "flex flex-col gap-1"
-                    )}>
-                       {fileList.length === 0 && isConfigured && !loadingFiles && (
-                           <div className={clsx("col-span-full flex flex-col items-center justify-center text-slate-400 gap-3", viewMode === 'grid' ? "py-20" : "py-10")}>
-                               <div className="w-16 h-16 bg-slate-100 dark:bg-slate-800 rounded-full flex items-center justify-center mb-2">
-                                   <Folder className="w-8 h-8 opacity-50" />
-                               </div>
-                               <span className="font-bold text-sm">空目录</span>
-                               <span className="text-xs opacity-70">此位置没有文件</span>
-                           </div>
-                       )}
+                      );
+                    })
+                  ) : (
+                    !isConfigured && <span className="text-slate-400 italic px-2">未配置</span>
+                  )}
+                </div>
+              </div>
 
-                       {fileList.map((file, i) => (
-                           <div key={i} 
-                                onClick={() => { if (file.isDir) handleNavigate(file.path); else toggleSelection(file.path); }} 
-                                className={clsx(
-                                    "group relative rounded-xl border transition-all duration-200 cursor-pointer select-none",
-                                    viewMode === 'grid' ? "p-4 flex flex-col justify-between" : "px-4 py-2.5 flex items-center gap-3",
-                                    selectedPaths.has(file.path)
-                                        ? "bg-blue-50 dark:bg-blue-900/20 border-blue-500/50 shadow-sm ring-1 ring-blue-500/20" 
-                                        : "bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-800 hover:border-blue-300 dark:hover:border-blue-700 hover:shadow-md"
-                                )}
-                           >
-                                <div className={clsx("flex items-center gap-2.5 min-w-0", viewMode === 'grid' ? "mb-2" : "flex-1")}>
-                                    {!file.isDir && (
-                                        <div 
-                                            className={clsx(
-                                                "w-4 h-4 rounded border flex shrink-0 items-center justify-center transition-all", 
-                                                selectedPaths.has(file.path) 
-                                                    ? "bg-blue-500 border-blue-500" 
-                                                    : "border-slate-300 dark:border-slate-600 hover:border-blue-400 bg-white dark:bg-slate-800"
-                                            )}
-                                            onClick={(e) => { e.stopPropagation(); toggleSelection(file.path); }}
-                                        >
-                                            {selectedPaths.has(file.path) && <Check className="w-3 h-3 text-white" />}
-                                        </div>
-                                    )}
-                                    {file.isDir && <div className="w-4 h-4 shrink-0" />} {/* Spacer for dirs without checkbox */}
-                                    <div className={clsx("truncate text-sm", file.isDir ? "text-blue-600 dark:text-blue-400 font-bold" : "text-slate-700 dark:text-slate-200 font-medium")}>
-                                        {file.isDir ? `[目录] ${file.name}` : file.name}
-                                    </div>
-                                </div>
-                                
-                                {viewMode === 'list' && (
-                                    <div className="text-[10px] text-slate-400 w-24 text-right font-mono uppercase tracking-tighter">
-                                        {file.isDir ? 'FOLDER' : (file.size ? (file.size / 1024 / 1024).toFixed(2) + ' MB' : '0 KB')}
-                                    </div>
-                                )}
-                                {viewMode === 'grid' && (
-                                    <div className="text-[10px] text-slate-400 text-right mt-1 font-mono uppercase tracking-tighter">
-                                        {file.isDir ? 'FOLDER' : (file.size ? (file.size / 1024 / 1024).toFixed(2) + ' MB' : '0 KB')}
-                                    </div>
-                                )}
-                           </div>
-                       ))}
-                    </div>
-                 )}
-               </div>
+              <div className="flex items-center gap-2">
+                <div className="flex bg-slate-100 dark:bg-slate-800 rounded-lg p-1 border border-slate-200 dark:border-slate-700 h-9">
+                  <button onClick={() => { setViewMode('grid'); window.ipcRenderer.invoke('config:set', 'view_mode', 'grid'); }} className={clsx("p-1.5 rounded-md transition-all", viewMode === 'grid' ? "bg-white dark:bg-slate-700 text-blue-600 shadow-sm" : "text-slate-400 hover:text-slate-600 dark:hover:text-slate-200")}>
+                    <LayoutGrid className="w-4 h-4" />
+                  </button>
+                  <button onClick={() => { setViewMode('list'); window.ipcRenderer.invoke('config:set', 'view_mode', 'list'); }} className={clsx("p-1.5 rounded-md transition-all", viewMode === 'list' ? "bg-white dark:bg-slate-700 text-blue-600 shadow-sm" : "text-slate-400 hover:text-slate-600 dark:hover:text-slate-200")}>
+                    <List className="w-4 h-4" />
+                  </button>
+                </div>
 
-               <div className={clsx("flex flex-col border-t border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 shrink-0 transition-all duration-300", showLogs ? "h-48" : "h-9")}>
-                  <div 
-                    className="px-4 py-2 border-b border-slate-100 dark:border-slate-800 flex justify-between items-center bg-slate-50/50 dark:bg-slate-900/50 cursor-pointer hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
-                    onClick={() => setShowLogs(!showLogs)}
-                  >
-                      <div className="text-[10px] font-bold text-slate-500 uppercase tracking-widest flex items-center gap-2">
-                        <div className={clsx("w-2 h-2 rounded-full transition-colors", isScanning ? 'bg-amber-400 animate-pulse' : 'bg-slate-300')}>
-                        </div>
-                        活动日志
+                {!isConfigured ? (
+                  <button onClick={() => { setActiveTab('settings'); setSettingsTab('library'); }} className="h-9 px-4 bg-blue-600 hover:bg-blue-500 text-white rounded-lg text-xs font-bold flex items-center gap-2 shadow-sm transition-all shadow-blue-500/20">
+                    配置数据源 <ArrowRight className="w-3 h-3" />
+                  </button>
+                ) : (
+                  <div className="flex items-center gap-2">
+                    <button onClick={toggleSelectAll} className="h-9 px-3 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-600 dark:text-slate-300 rounded-lg text-xs font-bold flex items-center gap-2 border border-slate-200 dark:border-slate-700 transition-all">
+                      <div className={clsx(
+                        "w-3.5 h-3.5 rounded border flex items-center justify-center transition-all",
+                        selectedPaths.size > 0 ? "bg-blue-500 border-blue-500" : "border-slate-400"
+                      )}>
+                        {selectedPaths.size > 0 && (
+                          selectedPaths.size === fileList.filter(f => !f.isDir).length
+                            ? <Check className="w-2.5 h-2.5 text-white" />
+                            : <Minus className="w-2.5 h-2.5 text-white" />
+                        )}
                       </div>
-                      <button className="text-slate-400 hover:text-slate-600 dark:hover:text-slate-200">
-                        {showLogs ? <ChevronDown className="w-4 h-4" /> : <ChevronUp className="w-4 h-4" />}
-                      </button>
+                      {selectedPaths.size > 0 && selectedPaths.size === fileList.filter(f => !f.isDir).length ? '取消全选' : '全选'}
+                    </button>
+
+                    <button onClick={handleStartScan} disabled={isScanning || (!currentPath && selectedPaths.size === 0)} className={clsx("h-9 px-4 rounded-lg text-xs font-bold flex items-center gap-2 transition-all", isScanning || (!currentPath && selectedPaths.size === 0) ? "bg-slate-100 dark:bg-slate-800 text-slate-400 border border-slate-200 dark:border-slate-700" : "bg-blue-600 hover:bg-blue-500 text-white shadow-lg shadow-blue-500/20")}>
+                      {isScanning ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <Wand2 className="w-3.5 h-3.5 fill-current" />}
+                      {isScanning ? '扫描中...' : (selectedPaths.size > 0 ? `匹配选中 (${selectedPaths.size})` : '扫描目录')}
+                    </button>
                   </div>
-                  <div className="flex-1 overflow-y-auto p-4 font-mono text-[11px] space-y-2">
-                      {logs.length === 0 && <div className="text-slate-400 italic opacity-50 flex items-center gap-2"><div className="w-1 h-1 bg-slate-400 rounded-full"></div> 系统就绪，等待任务...</div>}
-                      {logs.map((log, i) => (
-                        <div key={i} className="flex gap-3 group">
-                          <span className="text-slate-400 opacity-50 shrink-0 select-none">[{new Date(log.timestamp).toLocaleTimeString()}]</span>
-                          <span className={clsx("break-all", log.type === 'error' ? 'text-red-500 font-bold' : log.type === 'success' ? 'text-green-600 dark:text-green-400 font-bold' : 'text-slate-600 dark:text-slate-300')}>
-                             {log.message}
-                          </span>
+                )}
+              </div>
+            </div>
+
+            <div className="flex-1 flex flex-col min-h-0">
+              <div className="flex-1 overflow-y-auto p-4 bg-slate-50/50 dark:bg-slate-950/50">
+                {loadingFiles ? (
+                  <div className="flex flex-col items-center justify-center h-full text-slate-400 gap-3">
+                    <RefreshCw className="w-8 h-8 animate-spin opacity-50" />
+                    <span className="text-xs font-medium uppercase tracking-widest">正在加载目录...</span>
+                  </div>
+                ) : (
+                  <div className={clsx(
+                    viewMode === 'grid'
+                      ? "grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-3"
+                      : "flex flex-col gap-1"
+                  )}>
+                    {fileList.length === 0 && isConfigured && !loadingFiles && (
+                      <div className={clsx("col-span-full flex flex-col items-center justify-center text-slate-400 gap-3", viewMode === 'grid' ? "py-20" : "py-10")}>
+                        <div className="w-16 h-16 bg-slate-100 dark:bg-slate-800 rounded-full flex items-center justify-center mb-2">
+                          <Folder className="w-8 h-8 opacity-50" />
                         </div>
-                      ))}
-                      <div id="log-end" /> 
+                        <span className="font-bold text-sm">空目录</span>
+                        <span className="text-xs opacity-70">此位置没有文件</span>
+                      </div>
+                    )}
+
+                    {fileList.map((file, i) => (
+                      <div key={i}
+                        onClick={() => { if (file.isDir) handleNavigate(file.path); else toggleSelection(file.path); }}
+                        className={clsx(
+                          "group relative rounded-xl border transition-all duration-200 cursor-pointer select-none",
+                          viewMode === 'grid' ? "p-4 flex flex-col justify-between" : "px-4 py-2.5 flex items-center gap-3",
+                          selectedPaths.has(file.path)
+                            ? "bg-blue-50 dark:bg-blue-900/20 border-blue-500/50 shadow-sm ring-1 ring-blue-500/20"
+                            : "bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-800 hover:border-blue-300 dark:hover:border-blue-700 hover:shadow-md"
+                        )}
+                      >
+                        <div className={clsx("flex items-center gap-2.5 min-w-0", viewMode === 'grid' ? "mb-2" : "flex-1")}>
+                          {!file.isDir && (
+                            <div
+                              className={clsx(
+                                "w-4 h-4 rounded border flex shrink-0 items-center justify-center transition-all",
+                                selectedPaths.has(file.path)
+                                  ? "bg-blue-500 border-blue-500"
+                                  : "border-slate-300 dark:border-slate-600 hover:border-blue-400 bg-white dark:bg-slate-800"
+                              )}
+                              onClick={(e) => { e.stopPropagation(); toggleSelection(file.path); }}
+                            >
+                              {selectedPaths.has(file.path) && <Check className="w-3 h-3 text-white" />}
+                            </div>
+                          )}
+                          {file.isDir && <div className="w-4 h-4 shrink-0" />} {/* Spacer for dirs without checkbox */}
+                          <div className={clsx("truncate text-sm", file.isDir ? "text-blue-600 dark:text-blue-400 font-bold" : "text-slate-700 dark:text-slate-200 font-medium")}>
+                            {file.isDir ? `[目录] ${file.name}` : file.name}
+                          </div>
+                        </div>
+
+                        {viewMode === 'list' && (
+                          <div className="text-[10px] text-slate-400 w-24 text-right font-mono uppercase tracking-tighter">
+                            {file.isDir ? 'FOLDER' : (file.size ? (file.size / 1024 / 1024).toFixed(2) + ' MB' : '0 KB')}
+                          </div>
+                        )}
+                        {viewMode === 'grid' && (
+                          <div className="text-[10px] text-slate-400 text-right mt-1 font-mono uppercase tracking-tighter">
+                            {file.isDir ? 'FOLDER' : (file.size ? (file.size / 1024 / 1024).toFixed(2) + ' MB' : '0 KB')}
+                          </div>
+                        )}
+                      </div>
+                    ))}
                   </div>
-               </div>
+                )}
+              </div>
+
+              <div className={clsx("flex flex-col border-t border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 shrink-0 transition-all duration-300", showLogs ? "h-48" : "h-9")}>
+                <div
+                  className="px-4 py-2 border-b border-slate-100 dark:border-slate-800 flex justify-between items-center bg-slate-50/50 dark:bg-slate-900/50 cursor-pointer hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
+                  onClick={() => setShowLogs(!showLogs)}
+                >
+                  <div className="text-[10px] font-bold text-slate-500 uppercase tracking-widest flex items-center gap-2">
+                    <div className={clsx("w-2 h-2 rounded-full transition-colors", isScanning ? 'bg-amber-400 animate-pulse' : 'bg-slate-300')}>
+                    </div>
+                    活动日志
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <button
+                      onClick={(e) => { e.stopPropagation(); clearLogs(); }}
+                      className="p-1 hover:bg-slate-200 dark:hover:bg-slate-700 rounded text-slate-400 hover:text-red-500 transition-colors"
+                      title="清空日志"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                    </button>
+                    <button className="text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 p-1">
+                      {showLogs ? <ChevronDown className="w-4 h-4" /> : <ChevronUp className="w-4 h-4" />}
+                    </button>
+                  </div>
+                </div>
+                <div className="flex-1 overflow-y-auto p-4 font-mono text-[11px] space-y-2">
+                  {logs.length === 0 && <div className="text-slate-400 italic opacity-50 flex items-center gap-2"><div className="w-1 h-1 bg-slate-400 rounded-full"></div> 系统就绪，等待任务...</div>}
+                  {logs.map((log, i) => <LogItem key={i} log={log} />)}
+                  <div id="log-end" />
+                </div>
+              </div>
             </div>
           </div>
         )}
@@ -682,34 +748,35 @@ export default function App() {
               <button onClick={() => setSettingsTab('library')} className={clsx("pb-2 text-sm font-bold border-b-2 transition-all whitespace-nowrap", settingsTab === 'library' ? "border-blue-600 text-blue-600" : "border-transparent text-slate-400")}>媒体库</button>
               <button onClick={() => setSettingsTab('rules')} className={clsx("pb-2 text-sm font-bold border-b-2 transition-all whitespace-nowrap", settingsTab === 'rules' ? "border-blue-600 text-blue-600" : "border-transparent text-slate-400")}>匹配规则</button>
             </div>
-            
+
             <div className="flex-1 overflow-y-auto p-8 space-y-8 max-w-4xl">
-              
+
               {settingsTab === 'general' && (
                 <>
                   <section className="space-y-4">
-                     <h3 className="text-xs font-bold text-slate-400 uppercase tracking-widest flex items-center gap-2"><Eye className="w-4 h-4" /> 外观与行为</h3>
-                     <div className="grid grid-cols-2 gap-4">
-                        <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-4 flex items-center justify-between">
-                            <span className="text-sm font-bold">主题模式</span>
-                            <div className="flex bg-slate-100 dark:bg-slate-800 rounded-lg p-1 border border-slate-200 dark:border-slate-700">
-                                <button onClick={() => setTheme('light')} className={clsx("p-1.5 rounded-md transition-all", theme === 'light' ? "bg-white text-orange-500 shadow-sm" : "text-slate-400")}>
-                                    <Sun className="w-4 h-4" />
-                                </button>
-                                <button onClick={() => setTheme('dark')} className={clsx("p-1.5 rounded-md transition-all", theme === 'dark' ? "bg-slate-700 text-blue-400 shadow-sm" : "text-slate-400")}>
-                                    <Moon className="w-4 h-4" />
-                                </button>
-                            </div>
+                    <h3 className="text-xs font-bold text-slate-400 uppercase tracking-widest flex items-center gap-2"><Eye className="w-4 h-4" /> 外观与行为</h3>
+                    <div className="grid grid-cols-2 gap-4">
+                      <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-4 flex items-center justify-between">
+                        <span className="text-sm font-bold">主题模式</span>
+                        <div className="flex bg-slate-100 dark:bg-slate-800 rounded-lg p-1 border border-slate-200 dark:border-slate-700">
+                          <button onClick={() => setTheme('light')} className={clsx("p-1.5 rounded-md transition-all", theme === 'light' ? "bg-white text-orange-500 shadow-sm" : "text-slate-400")}>
+                            <Sun className="w-4 h-4" />
+                          </button>
+                          <button onClick={() => setTheme('dark')} className={clsx("p-1.5 rounded-md transition-all", theme === 'dark' ? "bg-slate-700 text-blue-400 shadow-sm" : "text-slate-400")}>
+                            <Moon className="w-4 h-4" />
+                          </button>
                         </div>
-                        <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-4 flex items-center justify-between">
-                            <span className="text-sm font-bold">日志级别</span>
-                            <select value={logLevel} onChange={(e) => setLogLevel(e.target.value as any)} className="bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg px-2 py-1 text-xs outline-none font-bold">
-                                <option value="info">Info (信息)</option>
-                                <option value="warn">Warning (警告)</option>
-                                <option value="error">Error (错误)</option>
-                            </select>
-                        </div>
-                     </div>
+                      </div>
+                      <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-4 flex items-center justify-between">
+                        <span className="text-sm font-bold">日志级别</span>
+                        <select value={logLevel} onChange={(e) => setLogLevel(e.target.value as any)} className="bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg px-2 py-1 text-xs outline-none font-bold">
+                          <option value="debug">Debug (调试)</option>
+                          <option value="info">Info (信息)</option>
+                          <option value="warn">Warning (警告)</option>
+                          <option value="error">Error (错误)</option>
+                        </select>
+                      </div>
+                    </div>
                   </section>
                   <section className="space-y-4">
                     <h3 className="text-xs font-bold text-slate-400 uppercase tracking-widest flex items-center gap-2"><Network className="w-4 h-4" /> 网络代理</h3>
@@ -722,74 +789,74 @@ export default function App() {
                   <section className="space-y-4">
                     <h3 className="text-xs font-bold text-slate-400 uppercase tracking-widest flex items-center gap-2"><Clapperboard className="w-4 h-4" /> 扫描设置</h3>
                     <div className="space-y-2">
-                        <label className="text-[10px] font-bold text-slate-400 uppercase">视频扩展名</label>
-                        <input type="text" value={videoExtsInput} onChange={e => setVideoExtsInput(e.target.value)} placeholder="mkv,mp4,avi,mov,iso,rmvb" className="w-full bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-lg px-4 py-2 text-sm outline-none focus:ring-2 ring-blue-500/20" />
-                        <p className="text-[10px] text-slate-500 italic">请使用逗号分隔多个扩展名。</p>
+                      <label className="text-[10px] font-bold text-slate-400 uppercase">视频扩展名</label>
+                      <input type="text" value={videoExtsInput} onChange={e => setVideoExtsInput(e.target.value)} placeholder="mkv,mp4,avi,mov,iso,rmvb" className="w-full bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-lg px-4 py-2 text-sm outline-none focus:ring-2 ring-blue-500/20" />
+                      <p className="text-[10px] text-slate-500 italic">请使用逗号分隔多个扩展名。</p>
                     </div>
                   </section>
                 </>
               )}
 
               {settingsTab === 'metadata' && (
-                  <section className="space-y-4">
-                    <h3 className="text-xs font-bold text-slate-400 uppercase tracking-widest flex items-center gap-2"><Globe className="w-4 h-4" /> TMDB 配置</h3>
-                    <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-6 space-y-4">
-                        <div className="flex items-center justify-between">
-                             <div className="flex items-center gap-3">
-                                <img src="https://www.themoviedb.org/assets/2/v4/logos/v2/blue_square_1-5bdc75aaebeb75dc7ae79426ddd9be3b2be1e342510f8202baf6bffa71d7f5c4.svg" className="w-10 h-10 object-contain" alt="TMDB" />
-                                <div>
-                                    <div className="font-bold">The Movie Database</div>
-                                    <div className="text-xs text-slate-400">主要元数据提供商</div>
-                                </div>
-                             </div>
-                             <TestButton onClick={handleTestTmdb} loading={isTestingTmdb} label="验证令牌" />
+                <section className="space-y-4">
+                  <h3 className="text-xs font-bold text-slate-400 uppercase tracking-widest flex items-center gap-2"><Globe className="w-4 h-4" /> TMDB 配置</h3>
+                  <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-6 space-y-4">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-3">
+                        <img src="https://www.themoviedb.org/assets/2/v4/logos/v2/blue_square_1-5bdc75aaebeb75dc7ae79426ddd9be3b2be1e342510f8202baf6bffa71d7f5c4.svg" className="w-10 h-10 object-contain" alt="TMDB" />
+                        <div>
+                          <div className="font-bold">The Movie Database</div>
+                          <div className="text-xs text-slate-400">主要元数据提供商</div>
                         </div>
-                        <div className="space-y-2 pt-2">
-                            <label className="text-[10px] font-bold text-slate-400 uppercase">API 读写令牌 (Read Access Token)</label>
-                            <div className="relative">
-                                <input type={showTmdbKey ? "text" : "password"} value={tmdbKey} onChange={e => setConfig('tmdbKey', e.target.value)} className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-lg pl-4 pr-10 py-2 text-sm outline-none" placeholder="eyJ..." />
-                                <button onClick={() => setShowTmdbKey(!showTmdbKey)} className="absolute right-3 top-2.5 text-slate-400">{showTmdbKey ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}</button>
-                            </div>
-                        </div>
-                        <StatusMessage result={tmdbTestResult} />
+                      </div>
+                      <TestButton onClick={handleTestTmdb} loading={isTestingTmdb} label="验证令牌" />
                     </div>
-                  </section>
+                    <div className="space-y-2 pt-2">
+                      <label className="text-[10px] font-bold text-slate-400 uppercase">API 读写令牌 (Read Access Token)</label>
+                      <div className="relative">
+                        <input type={showTmdbKey ? "text" : "password"} value={tmdbKey} onChange={e => setConfig('tmdbKey', e.target.value)} className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-lg pl-4 pr-10 py-2 text-sm outline-none" placeholder="eyJ..." />
+                        <button onClick={() => setShowTmdbKey(!showTmdbKey)} className="absolute right-3 top-2.5 text-slate-400">{showTmdbKey ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}</button>
+                      </div>
+                    </div>
+                    <StatusMessage result={tmdbTestResult} />
+                  </div>
+                </section>
               )}
 
               {settingsTab === 'llm' && (
-                  <section className="space-y-4">
-                    <h3 className="text-xs font-bold text-slate-400 uppercase tracking-widest flex items-center gap-2"><Play className="w-4 h-4" /> OpenAI 兼容服务</h3>
-                    <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-6 space-y-4">
-                        <div className="flex gap-2 items-end">
-                            <div className="flex-1 space-y-2">
-                                <label className="text-[10px] font-bold text-slate-400 uppercase">接口地址 (Base URL)</label>
-                                <input type="text" value={openaiBaseUrl} onChange={e => setConfig('openaiBaseUrl', e.target.value)} placeholder="https://api.openai.com/v1" className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-lg px-4 py-2 text-sm outline-none" />
-                            </div>
-                            <div className="flex-1 space-y-2">
-                                <label className="text-[10px] font-bold text-slate-400 uppercase">模型名称 (Model)</label>
-                                {availableModels.length > 0 ? (
-                                  <select value={openaiModel} onChange={e => setConfig('openaiModel', e.target.value)} className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-lg px-4 py-2 text-sm outline-none">{availableModels.map(m => <option key={m} value={m}>{m}</option>)}</select>
-                                ) : (
-                                  <input type="text" value={openaiModel} onChange={e => setConfig('openaiModel', e.target.value)} className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-lg px-4 py-2 text-sm outline-none" />
-                                )}
-                            </div>
-                        </div>
-                        <div className="space-y-2">
-                            <label className="text-[10px] font-bold text-slate-400 uppercase">API 密钥 (Key)</label>
-                            <div className="flex gap-2">
-                                <div className="relative flex-1">
-                                    <input type={showOpenaiKey ? "text" : "password"} value={openaiKey} onChange={e => setConfig('openaiKey', e.target.value)} placeholder="sk-..." className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-lg pl-4 pr-10 py-2 text-sm outline-none" />
-                                    <button onClick={() => setShowOpenaiKey(!showOpenaiKey)} className="absolute right-3 top-2.5 text-slate-400">{showOpenaiKey ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}</button>
-                                </div>
-                                <TestButton onClick={handleTestLLM} loading={isTestingLLM} label="测试连接" />
-                            </div>
-                        </div>
-                        <StatusMessage result={llmTestResult} />
+                <section className="space-y-4">
+                  <h3 className="text-xs font-bold text-slate-400 uppercase tracking-widest flex items-center gap-2"><Play className="w-4 h-4" /> OpenAI 兼容服务</h3>
+                  <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-6 space-y-4">
+                    <div className="flex gap-2 items-end">
+                      <div className="flex-1 space-y-2">
+                        <label className="text-[10px] font-bold text-slate-400 uppercase">接口地址 (Base URL)</label>
+                        <input type="text" value={openaiBaseUrl} onChange={e => setConfig('openaiBaseUrl', e.target.value)} placeholder="https://api.openai.com/v1" className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-lg px-4 py-2 text-sm outline-none" />
+                      </div>
+                      <div className="flex-1 space-y-2">
+                        <label className="text-[10px] font-bold text-slate-400 uppercase">模型名称 (Model)</label>
+                        {availableModels.length > 0 ? (
+                          <select value={openaiModel} onChange={e => setConfig('openaiModel', e.target.value)} className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-lg px-4 py-2 text-sm outline-none">{availableModels.map(m => <option key={m} value={m}>{m}</option>)}</select>
+                        ) : (
+                          <input type="text" value={openaiModel} onChange={e => setConfig('openaiModel', e.target.value)} className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-lg px-4 py-2 text-sm outline-none" />
+                        )}
+                      </div>
                     </div>
-                    <div className="p-4 rounded-xl bg-blue-50 dark:bg-blue-900/10 border border-blue-100 dark:border-blue-900/30 text-xs text-blue-600 dark:text-blue-400">
-                        <strong>说明：</strong> 支持所有兼容 OpenAI 接口协议的服务（如 LocalAI, Ollama, DeepSeek 等）。
+                    <div className="space-y-2">
+                      <label className="text-[10px] font-bold text-slate-400 uppercase">API 密钥 (Key)</label>
+                      <div className="flex gap-2">
+                        <div className="relative flex-1">
+                          <input type={showOpenaiKey ? "text" : "password"} value={openaiKey} onChange={e => setConfig('openaiKey', e.target.value)} placeholder="sk-..." className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-lg pl-4 pr-10 py-2 text-sm outline-none" />
+                          <button onClick={() => setShowOpenaiKey(!showOpenaiKey)} className="absolute right-3 top-2.5 text-slate-400">{showOpenaiKey ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}</button>
+                        </div>
+                        <TestButton onClick={handleTestLLM} loading={isTestingLLM} label="测试连接" />
+                      </div>
                     </div>
-                  </section>
+                    <StatusMessage result={llmTestResult} />
+                  </div>
+                  <div className="p-4 rounded-xl bg-blue-50 dark:bg-blue-900/10 border border-blue-100 dark:border-blue-900/30 text-xs text-blue-600 dark:text-blue-400">
+                    <strong>说明：</strong> 支持所有兼容 OpenAI 接口协议的服务（如 LocalAI, Ollama, DeepSeek 等）。
+                  </div>
+                </section>
               )}
 
               {settingsTab === 'library' && (
@@ -855,66 +922,66 @@ export default function App() {
               {(wizardStage === 'series' || wizardStage === 'episodes' || wizardStage === 'finished') && <button onClick={closeWizard} className="p-2 hover:bg-slate-100 rounded-full"><X className="w-5 h-5" /></button>}
             </div>
             {wizardStage === 'series' && (
-                <div className="flex-1 overflow-y-auto p-4 space-y-3 max-h-[60vh]">
-                    {wizardData.seriesResults?.map((item: any) => (
-                        <div key={item.id} onClick={() => handleConfirmSeries(item.id)} className="flex gap-4 p-3 rounded-xl border hover:border-blue-500 cursor-pointer transition-all">
-                            {item.poster ? <img src={item.poster} className="w-20 h-28 object-cover rounded-md" alt="" /> : <div className="w-20 h-28 bg-slate-100 rounded-md flex items-center justify-center"><File className="w-8 h-8 text-slate-400" /></div>}
-                            <div className="flex-1 min-w-0"><h4 className="font-bold text-lg truncate">{item.title} ({item.year || 'N/A'})</h4><p className="text-xs text-slate-500 line-clamp-3 mt-1">{item.overview}</p></div>
-                        </div>
-                    ))}
-                    <button onClick={() => handleConfirmSeries(null)} className="w-full p-4 border-2 border-dashed rounded-xl text-sm font-bold text-slate-400">跳过并使用原文件名</button>
-                </div>
+              <div className="flex-1 overflow-y-auto p-4 space-y-3 max-h-[60vh]">
+                {wizardData.seriesResults?.map((item: any) => (
+                  <div key={item.id} onClick={() => handleConfirmSeries(item.id)} className="flex gap-4 p-3 rounded-xl border hover:border-blue-500 cursor-pointer transition-all">
+                    {item.poster ? <img src={item.poster} className="w-20 h-28 object-cover rounded-md" alt="" /> : <div className="w-20 h-28 bg-slate-100 rounded-md flex items-center justify-center"><File className="w-8 h-8 text-slate-400" /></div>}
+                    <div className="flex-1 min-w-0"><h4 className="font-bold text-lg truncate">{item.title} ({item.year || 'N/A'})</h4><p className="text-xs text-slate-500 line-clamp-3 mt-1">{item.overview}</p></div>
+                  </div>
+                ))}
+                <button onClick={() => handleConfirmSeries(null)} className="w-full p-4 border-2 border-dashed rounded-xl text-sm font-bold text-slate-400">跳过并使用原文件名</button>
+              </div>
             )}
             {wizardStage === 'loading_episodes' && <div className="flex-1 py-20 flex flex-col items-center justify-center space-y-4"><RefreshCw className="w-10 h-10 text-blue-500 animate-spin" /><p className="font-bold">正在获取详细信息...</p></div>}
             {wizardStage === 'episodes' && (
-                <>
-                    <div className="px-6 py-4 bg-slate-50 border-b border-slate-200">
-                      <div className="flex flex-wrap gap-4">
-                        {[{id:'rename',label:'重命名'},{id:'writeNfo',label:'生成 NFO'},{id:'writePoster',label:'下载海报'},{id:'writeStill',label:'下载剧照'}].map(opt => (
-                          <label key={opt.id} className="flex items-center gap-2 cursor-pointer">
-                            <input type="checkbox" checked={(batchOptions as any)[opt.id]} onChange={() => toggleOption(opt.id as any)} className="w-4 h-4 rounded text-blue-600" />
-                            <span className="text-xs font-bold">{opt.label}</span>
-                          </label>
-                        ))}
-                      </div>
-                    </div>
-                    <div className="flex-1 overflow-y-auto max-h-[60vh]">
-                        <table className="w-full text-left border-collapse">
-                            <thead className="sticky top-0 bg-white border-b border-slate-200 text-[10px] font-bold text-slate-400 uppercase"><tr><th className="px-6 py-3 w-12"><input type="checkbox" checked={selectedIndices.length === wizardData.matches?.length} onChange={toggleSelectIndicesAll} /></th><th>预览</th><th className="w-24">识别结果</th><th>元数据</th></tr></thead>
-                            <tbody className="divide-y divide-slate-200">
-                                {wizardData.matches?.map((item: any, idx: number) => {
-                                    const fileExt = item.file.name.substring(item.file.name.lastIndexOf('.'));
-                                    const newName = item.metadata ? `${wizardData.seriesName} - S${String(item.match.season ?? 1).padStart(2, '0')}E${String(item.match.episode ?? 1).padStart(2, '0')} - ${item.metadata.title}${fileExt}` : '';
-                                    return (
-                                        <tr key={idx} className={clsx(!selectedIndices.includes(idx) && "opacity-50")}>
-                                            <td className="px-6 py-4"><input type="checkbox" checked={selectedIndices.includes(idx)} onChange={() => toggleIndex(idx)} /></td>
-                                            <td className="px-6 py-4 text-[11px]">
-                                              <div className="text-slate-400 truncate">{item.file.name}</div>
-                                              {batchOptions.rename && newName && newName !== item.file.name && (<div className="text-green-600 font-bold truncate">→ {newName}</div>)}
-                                            </td>
-                                            <td className="px-6 py-4 text-center">
-                                                <button 
-                                                  onClick={() => { setEditingMatchIndex(idx); setEditMatchValues({ season: item.match.season ?? 1, episode: item.match.episode ?? 1 }); }}
-                                                  className="px-2 py-1 rounded hover:bg-slate-100 dark:hover:bg-slate-800 text-xs font-bold text-slate-500 hover:text-blue-600 transition-colors border border-transparent hover:border-blue-200"
-                                                >
-                                                  S{String(item.match.season ?? 1).padStart(2, '0')}E{String(item.match.episode ?? 1).padStart(2, '0')}
-                                                </button>
-                                            </td>
-                                            <td className="px-6 py-4 cursor-pointer" onClick={() => handleShowEpisodeDetail(item)}>{item.metadata ? <div className="flex items-center gap-2">{item.metadata.stillPath && <img src={item.metadata.stillPath} className="w-10 h-6 object-cover rounded" alt="" />}<div className="text-xs font-bold text-blue-600 truncate">{item.metadata.title}</div></div> : <span className="text-[10px] text-red-400">无元数据</span>}</td>
-                                        </tr>
-                                    );
-                                })}
-                            </tbody>
-                        </table>
-                    </div>
-                    <div className="p-6 border-t border-slate-200 flex justify-end gap-3"><button onClick={() => handleConfirmEpisodes(false)} className="px-4 py-2 text-sm font-bold text-slate-500">取消</button><button onClick={() => handleConfirmEpisodes(true)} disabled={selectedIndices.length === 0} className="px-8 py-2 bg-blue-600 text-white rounded-lg font-bold">执行</button></div>
-                </>
+              <>
+                <div className="px-6 py-4 bg-slate-50 border-b border-slate-200">
+                  <div className="flex flex-wrap gap-4">
+                    {[{ id: 'rename', label: '重命名' }, { id: 'writeNfo', label: '生成 NFO' }, { id: 'writePoster', label: '下载海报' }, { id: 'writeStill', label: '下载剧照' }].map(opt => (
+                      <label key={opt.id} className="flex items-center gap-2 cursor-pointer">
+                        <input type="checkbox" checked={(batchOptions as any)[opt.id]} onChange={() => toggleOption(opt.id as any)} className="w-4 h-4 rounded text-blue-600" />
+                        <span className="text-xs font-bold">{opt.label}</span>
+                      </label>
+                    ))}
+                  </div>
+                </div>
+                <div className="flex-1 overflow-y-auto max-h-[60vh]">
+                  <table className="w-full text-left border-collapse">
+                    <thead className="sticky top-0 bg-white border-b border-slate-200 text-[10px] font-bold text-slate-400 uppercase"><tr><th className="px-6 py-3 w-12"><input type="checkbox" checked={selectedIndices.length === wizardData.matches?.length} onChange={toggleSelectIndicesAll} /></th><th>预览</th><th className="w-24">识别结果</th><th>元数据</th></tr></thead>
+                    <tbody className="divide-y divide-slate-200">
+                      {wizardData.matches?.map((item: any, idx: number) => {
+                        const fileExt = item.file.name.substring(item.file.name.lastIndexOf('.'));
+                        const newName = item.metadata ? `${wizardData.seriesName} - S${String(item.match.season ?? 1).padStart(2, '0')}E${String(item.match.episode ?? 1).padStart(2, '0')} - ${item.metadata.title}${fileExt}` : '';
+                        return (
+                          <tr key={idx} className={clsx(!selectedIndices.includes(idx) && "opacity-50")}>
+                            <td className="px-6 py-4"><input type="checkbox" checked={selectedIndices.includes(idx)} onChange={() => toggleIndex(idx)} /></td>
+                            <td className="px-6 py-4 text-[11px]">
+                              <div className="text-slate-400 truncate">{item.file.name}</div>
+                              {batchOptions.rename && newName && newName !== item.file.name && (<div className="text-green-600 font-bold truncate">→ {newName}</div>)}
+                            </td>
+                            <td className="px-6 py-4 text-center">
+                              <button
+                                onClick={() => { setEditingMatchIndex(idx); setEditMatchValues({ season: item.match.season ?? 1, episode: item.match.episode ?? 1 }); }}
+                                className="px-2 py-1 rounded hover:bg-slate-100 dark:hover:bg-slate-800 text-xs font-bold text-slate-500 hover:text-blue-600 transition-colors border border-transparent hover:border-blue-200"
+                              >
+                                S{String(item.match.season ?? 1).padStart(2, '0')}E{String(item.match.episode ?? 1).padStart(2, '0')}
+                              </button>
+                            </td>
+                            <td className="px-6 py-4 cursor-pointer" onClick={() => handleShowEpisodeDetail(item)}>{item.metadata ? <div className="flex items-center gap-2">{item.metadata.stillPath && <img src={item.metadata.stillPath} className="w-10 h-6 object-cover rounded" alt="" />}<div className="text-xs font-bold text-blue-600 truncate">{item.metadata.title}</div></div> : <span className="text-[10px] text-red-400">无元数据</span>}</td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+                <div className="p-6 border-t border-slate-200 flex justify-end gap-3"><button onClick={() => handleConfirmEpisodes(false)} className="px-4 py-2 text-sm font-bold text-slate-500">取消</button><button onClick={() => handleConfirmEpisodes(true)} disabled={selectedIndices.length === 0} className="px-8 py-2 bg-blue-600 text-white rounded-lg font-bold">执行</button></div>
+              </>
             )}
             {(wizardStage === 'executing' || wizardStage === 'finished') && (
-                <div className="p-12 flex flex-col items-center justify-center space-y-8">
-                    <div className="w-full max-w-md space-y-4"><div className="flex justify-between text-sm font-bold"><span>{scrapeProgress.message}</span><span>{scrapeProgress.percent}%</span></div><div className="w-full h-2 bg-slate-100 rounded-full overflow-hidden"><div className="h-full bg-blue-600 transition-all duration-300" style={{ width: `${scrapeProgress.percent}%` }}></div></div></div>
-                    {wizardStage === 'finished' && <button onClick={closeWizard} className="px-10 py-2.5 bg-slate-900 text-white rounded-xl font-bold">关闭向导</button>}
-                </div>
+              <div className="p-12 flex flex-col items-center justify-center space-y-8">
+                <div className="w-full max-w-md space-y-4"><div className="flex justify-between text-sm font-bold"><span>{scrapeProgress.message}</span><span>{scrapeProgress.percent}%</span></div><div className="w-full h-2 bg-slate-100 rounded-full overflow-hidden"><div className="h-full bg-blue-600 transition-all duration-300" style={{ width: `${scrapeProgress.percent}%` }}></div></div></div>
+                {wizardStage === 'finished' && <button onClick={closeWizard} className="px-10 py-2.5 bg-slate-900 text-white rounded-xl font-bold">关闭向导</button>}
+              </div>
             )}
           </div>
         </div>
@@ -932,21 +999,21 @@ export default function App() {
               <div className="grid grid-cols-2 gap-6">
                 <div className="space-y-2">
                   <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">季 (Season)</label>
-                  <input 
-                    type="number" 
+                  <input
+                    type="number"
                     min="0"
-                    value={editMatchValues.season} 
-                    onChange={e => setEditMatchValues({...editMatchValues, season: parseInt(e.target.value) ?? 0})}
+                    value={editMatchValues.season}
+                    onChange={e => setEditMatchValues({ ...editMatchValues, season: parseInt(e.target.value) ?? 0 })}
                     className="w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl px-4 py-3 text-lg font-bold outline-none focus:ring-2 ring-blue-500/20 transition-all"
                   />
                 </div>
                 <div className="space-y-2">
                   <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">集 (Episode)</label>
-                  <input 
-                    type="number" 
+                  <input
+                    type="number"
                     min="1"
-                    value={editMatchValues.episode} 
-                    onChange={e => setEditMatchValues({...editMatchValues, episode: parseInt(e.target.value) ?? 1})}
+                    value={editMatchValues.episode}
+                    onChange={e => setEditMatchValues({ ...editMatchValues, episode: parseInt(e.target.value) ?? 1 })}
                     className="w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl px-4 py-3 text-lg font-bold outline-none focus:ring-2 ring-blue-500/20 transition-all"
                   />
                 </div>
@@ -967,25 +1034,25 @@ export default function App() {
           <div className="bg-white dark:bg-slate-900 w-full max-w-3xl rounded-3xl overflow-hidden shadow-2xl">
             {selectedEpisodeDetail.stillPath && <div className="relative h-64"><img src={selectedEpisodeDetail.stillPath} className="w-full h-full object-cover" alt="" /></div>}
             <div className="p-8">
-                <h3 className="text-2xl font-black">{selectedEpisodeDetail.title} (S{selectedEpisodeDetail.season}E{selectedEpisodeDetail.episode})</h3>
-                
-                <div className="flex items-center gap-6 mt-3 text-xs font-bold text-slate-400 uppercase tracking-wider">
-                  {selectedEpisodeDetail.airDate && (
-                    <div className="flex items-center gap-2">
-                      <Calendar className="w-3.5 h-3.5 text-blue-500" />
-                      {selectedEpisodeDetail.airDate}
-                    </div>
-                  )}
-                  {selectedEpisodeDetail.runtime !== undefined && selectedEpisodeDetail.runtime !== null && (
-                    <div className="flex items-center gap-2">
-                      <Clock className="w-3.5 h-3.5 text-amber-500" />
-                      {selectedEpisodeDetail.runtime} 分钟
-                    </div>
-                  )}
-                </div>
+              <h3 className="text-2xl font-black">{selectedEpisodeDetail.title} (S{selectedEpisodeDetail.season}E{selectedEpisodeDetail.episode})</h3>
 
-                <p className="mt-4 text-sm text-slate-600 dark:text-slate-300 whitespace-pre-wrap leading-relaxed">{selectedEpisodeDetail.overview || "暂无简介。"}</p>
-                <div className="mt-6 pt-6 border-t border-slate-100 flex justify-end"><button onClick={() => setSelectedEpisodeDetail(null)} className="px-6 py-2 bg-slate-100 dark:bg-slate-800 rounded-xl font-bold text-xs">关闭</button></div>
+              <div className="flex items-center gap-6 mt-3 text-xs font-bold text-slate-400 uppercase tracking-wider">
+                {selectedEpisodeDetail.airDate && (
+                  <div className="flex items-center gap-2">
+                    <Calendar className="w-3.5 h-3.5 text-blue-500" />
+                    {selectedEpisodeDetail.airDate}
+                  </div>
+                )}
+                {selectedEpisodeDetail.runtime !== undefined && selectedEpisodeDetail.runtime !== null && (
+                  <div className="flex items-center gap-2">
+                    <Clock className="w-3.5 h-3.5 text-amber-500" />
+                    {selectedEpisodeDetail.runtime} 分钟
+                  </div>
+                )}
+              </div>
+
+              <p className="mt-4 text-sm text-slate-600 dark:text-slate-300 whitespace-pre-wrap leading-relaxed">{selectedEpisodeDetail.overview || "暂无简介。"}</p>
+              <div className="mt-6 pt-6 border-t border-slate-100 flex justify-end"><button onClick={() => setSelectedEpisodeDetail(null)} className="px-6 py-2 bg-slate-100 dark:bg-slate-800 rounded-xl font-bold text-xs">关闭</button></div>
             </div>
           </div>
         </div>

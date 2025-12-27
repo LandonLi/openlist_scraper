@@ -17,6 +17,7 @@
     *   **OpenList 模式**：支持连接 OpenList 服务器进行远程文件管理（需配置服务器 URL 和 Token）。
 *   **现代化 UI**：基于 React + Tailwind CSS 构建的精美界面，支持 **深色模式 (Dark Mode)** 切换，提供网格与列表两种视图。
 *   **灵活配置**：支持自定义正则匹配规则，可配置 OpenAI 兼容接口（如 LocalAI, Ollama）以降低识别成本。
+*   **详细的日志系统**：内置活动日志面板，支持点击复制、折叠长日志（如 JSON 数据）、关键字高亮与多级日志过滤（Debug/Info/Error），方便排查元数据匹配问题。
 
 ## 🛠️ 技术栈
 
@@ -74,6 +75,8 @@ npm run build
 3.  **媒体库 (Media Library)**：
     *   选择 **本地 (Local)** 并指定您的视频文件夹路径。
     *   或者配置 OpenList 服务器信息。
+4.  **调试 (Debugging)**：
+    *   在 **通用 (General)** 设置中，您可以调整日志级别。设置为 **Debug** 可以查看详细的 API 请求参数、LLM Prompt 和原始 JSON 响应，便于排查扫描失败的原因。
 
 ## 📝 使用说明
 

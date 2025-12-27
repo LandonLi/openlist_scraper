@@ -24,4 +24,5 @@ export interface IMetadataProvider {
   searchTVShow(query: string): Promise<SearchResult[]>;
   getSeasonDetails(showId: string, season: number): Promise<EpisodeData[]>;
   getEpisodeDetails(showId: string, season: number, episode: number): Promise<EpisodeData | null>;
+  setDebugLogger?(logger: (message: string) => void): void;
 }
