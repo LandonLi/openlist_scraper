@@ -153,7 +153,7 @@ export class ScannerService {
       const allFiles = await source.listDir(dirPath);
 
       const extPattern = videoExtensions.split(',').map(e => e.trim()).filter(e => e).join('|');
-      const videoRegex = new RegExp(`\.(${extPattern}) $`, 'i');
+      const videoRegex = new RegExp(`\.(${extPattern})$`, 'i');
       const videoFiles = allFiles.filter(f => !f.isDir && videoRegex.test(f.name));
 
       this.log(`上下文: 找到 ${videoFiles.length} 个同级视频文件。`);
@@ -257,7 +257,7 @@ export class ScannerService {
       for (const item of itemsToProcess) {
         if (item.metadata) {
           const fileExt = path.posix.extname(item.file.name);
-          const newName = `${seriesName} - S${String(item.match.season).padStart(2, '0')}E${String(item.match.episode).padStart(2, '0')} - ${item.metadata.title}${fileExt} `;
+          const newName = `${seriesName} - S${String(item.match.season).padStart(2, '0')}E${String(item.match.episode).padStart(2, '0')} - ${item.metadata.title}${fileExt}`;
           if (item.file.name !== newName) renameObjects.push({ src_name: item.file.name, new_name: newName });
         }
       }
