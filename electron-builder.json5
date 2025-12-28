@@ -4,6 +4,7 @@
   "appId": "com.openlist.scraper",
   "asar": true,
   "productName": "OpenListScraper",
+  "compression": "maximum",
   "directories": {
     "output": "release/${version}"
   },
