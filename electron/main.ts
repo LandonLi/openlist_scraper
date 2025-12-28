@@ -199,6 +199,8 @@ function registerIpcHandlers() {
     return await metadataProvider.getEpisodeDetails(showId, season, episode);
   });
 
+  ipcMain.handle('app:getVersion', () => app.getVersion());
+
   ipcMain.handle('rules:get', async () => {
     const defaultPath = path.join(process.env.DIST_ELECTRON || '', 'resources/default_rules.json');
     const userPath = path.join(app.getPath('userData'), 'custom_rules.json');
@@ -245,6 +247,10 @@ function createWindow() {
   else win.loadFile(path.join(process.env.DIST || '', 'index.html'));
 }
 
+// Update Service
+import { UpdateService } from './services/UpdateService';
+let updateService: UpdateService;
+
 app.whenReady().then(() => {
   // 2. Initialize store AFTER app name is set
   store = new ElectronStore({ name: 'settings' });
@@ -267,10 +273,28 @@ app.whenReady().then(() => {
   scannerService.setProxy(savedProxyUrl);
   if (metadataProvider.setProxy) (metadataProvider as any).setProxy(savedProxyUrl);
 
+  // Initialize Update Service
+  updateService = new UpdateService(store);
+
+  ipcMain.handle('update:check', async () => {
+    return await updateService.checkUpdate();
+  });
+
+  ipcMain.handle('update:download', async (_, url) => {
+    return await updateService.downloadUpdate(url);
+  });
+
+  ipcMain.handle('update:install', () => {
+    updateService.installUpdate();
+  });
+
   if (process.platform === 'win32') {
     app.setAppUserModelId('com.openlist.scraper');
   }
 
   registerIpcHandlers();
   createWindow();
+
+  // Set window for update service
+  if (win) updateService.setMainWindow(win);
 });
