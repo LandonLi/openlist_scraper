@@ -87,13 +87,19 @@ export class ScannerService {
     this.log(`${message}${suffix} `, 'debug');
   }
 
-  private async requestUserConfirmation(detectedName: string, results: any[]): Promise<{ id: string, poster?: string } | null> {
+  private async requestUserConfirmation(detectedName: string, results: any[]): Promise<{ id: string, poster?: string, newName?: string } | null> {
     if (!this.mainWindow) return null;
     return new Promise((resolve) => {
       setTimeout(() => {
         this.mainWindow?.webContents.send('scanner-require-confirmation', { detectedName, results });
       }, 200);
-      ipcMain.once('scanner-confirm-response', (_: any, response: { seriesId: string | null }) => {
+      ipcMain.once('scanner-confirm-response', (_: any, response: { seriesId: string | null, newName?: string }) => {
+        // If user provided a new name to search
+        if (response.newName) {
+          resolve({ id: '', newName: response.newName });
+          return;
+        }
+
         const selected = results.find(r => r.id === response.seriesId);
         resolve(selected ? { id: selected.id, poster: selected.poster } : null);
       });
@@ -201,12 +207,34 @@ export class ScannerService {
 
   private async processSeriesGroup(source: IMediaSource, seriesName: string, items: any[]) {
     let seriesInfo = this.showMetadataCache.get(seriesName);
-    if (!seriesInfo) {
-      const results = await this.metadataProvider.searchTVShow(seriesName);
+    let currentSearchName = seriesName;
+
+    // Loop until we have series info or user cancels
+    while (!seriesInfo) {
+      const results = await this.metadataProvider.searchTVShow(currentSearchName);
       // Always show confirmation for single file identification to be safe
-      const confirmed = await this.requestUserConfirmation(seriesName, results);
-      if (confirmed) { seriesInfo = confirmed; this.showMetadataCache.set(seriesName, seriesInfo); }
-      else { return; }
+      const confirmed = await this.requestUserConfirmation(currentSearchName, results);
+
+      if (!confirmed) return; // Cancelled
+
+      if (confirmed.newName) {
+        // User requesting re-search
+        currentSearchName = confirmed.newName;
+        this.log(`用户请求手动修正剧名: ${currentSearchName}, 正在重新搜索...`, 'info');
+        continue;
+      }
+
+      if (confirmed.id) {
+        seriesInfo = { id: confirmed.id, poster: confirmed.poster };
+        this.showMetadataCache.set(seriesName, seriesInfo); // Cache by original name too? or new name?
+        // Maybe better to cache by the ID and have a map from name -> ID.
+        // For now, let's cache by the *original* series name so next time it hits, but subsequent calls to processSeriesGroup usually pass the same seriesName from the grouper.
+        // Actually, if we changed the name, we might want to update the cache for the NEW name too if that's what we want to use.
+        // But for this flow, sticking to current logic is fine.
+        this.showMetadataCache.set(seriesName, seriesInfo);
+      } else {
+        return; // Should be covered by !confirmed check, but just safe guard
+      }
     }
 
     const tmdbId = seriesInfo.id;
