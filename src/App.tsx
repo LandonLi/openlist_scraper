@@ -108,6 +108,7 @@ export default function App() {
 
   // Selection State (Multi-select)
   const [selectedPaths, setSelectedPaths] = useState<Set<string>>(new Set());
+  const [lastClickedIndex, setLastClickedIndex] = useState<number | null>(null);
 
   // Settings inputs
   const [showTmdbKey, setShowTmdbKey] = useState(false);
@@ -358,6 +359,7 @@ export default function App() {
     setLoadingFiles(true);
     setFileList([]);
     setSelectedPaths(new Set());
+    setLastClickedIndex(null);
 
     if (!options?.isBack && currentPath) {
       setNavHistory(prev => [...prev, currentPath]);
@@ -500,11 +502,37 @@ export default function App() {
     } catch (e) { console.error(e); } finally { setLoadingDetail(false); }
   };
 
-  const toggleSelection = (path: string) => {
+  const toggleSelection = (path: string, index: number, event?: { ctrlKey: boolean; shiftKey: boolean }) => {
     const newSet = new Set(selectedPaths);
-    if (newSet.has(path)) newSet.delete(path);
-    else newSet.add(path);
+
+    // Shift 键：范围选择
+    if (event?.shiftKey && lastClickedIndex !== null) {
+      const start = Math.min(lastClickedIndex, index);
+      const end = Math.max(lastClickedIndex, index);
+
+      for (let i = start; i <= end; i++) {
+        const file = fileList[i];
+        if (!file.isDir) {
+          newSet.add(file.path);
+        }
+      }
+    }
+    // Ctrl 键：切换单个选择
+    else if (event?.ctrlKey) {
+      if (newSet.has(path)) {
+        newSet.delete(path);
+      } else {
+        newSet.add(path);
+      }
+    }
+    // 普通点击：替换选择
+    else {
+      newSet.clear();
+      newSet.add(path);
+    }
+
     setSelectedPaths(newSet);
+    setLastClickedIndex(index);
   };
 
   const toggleSelectAll = () => {
@@ -827,7 +855,7 @@ export default function App() {
 
                     {fileList.map((file, i) => (
                       <div key={i}
-                        onClick={() => { if (file.isDir) handleNavigate(file.path); else toggleSelection(file.path); }}
+                        onClick={(e) => { if (file.isDir) handleNavigate(file.path); else toggleSelection(file.path, i, { ctrlKey: e.ctrlKey, shiftKey: e.shiftKey }); }}
                         className={clsx(
                           "group relative rounded-xl border transition-all duration-200 cursor-pointer select-none",
                           viewMode === 'grid' ? "p-4 flex flex-col justify-between" : "px-4 py-2.5 flex items-center gap-3",
@@ -845,7 +873,7 @@ export default function App() {
                                   ? "bg-blue-500 border-blue-500"
                                   : "border-slate-300 dark:border-slate-600 hover:border-blue-400 bg-white dark:bg-slate-800"
                               )}
-                              onClick={(e) => { e.stopPropagation(); toggleSelection(file.path); }}
+                              onClick={(e) => { e.stopPropagation(); toggleSelection(file.path, i, { ctrlKey: e.ctrlKey, shiftKey: e.shiftKey }); }}
                             >
                               {selectedPaths.has(file.path) && <Check className="w-3 h-3 text-white" />}
                             </div>
