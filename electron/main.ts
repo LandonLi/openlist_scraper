@@ -213,6 +213,101 @@ function registerIpcHandlers() {
 
   ipcMain.handle('app:getVersion', () => app.getVersion());
 
+  ipcMain.handle('scanner:fetch-metadata', async (event, { matches, seriesId }) => {
+    try {
+      const total = matches.length;
+      console.log(`[元数据获取] 开始获取 ${total} 个文件的元数据，seriesId: ${seriesId}`);
+
+      const updatedMatches = [];
+      let completed = 0;
+      const concurrencyLimit = 10; // 并发限制为10个请求
+
+      // 发送初始进度
+      event.sender.send('metadata-progress', { current: 0, total });
+
+      // 批量处理函数
+      const processBatch = async (items: any[]) => {
+        const promises = items.map(async (item) => {
+          try {
+            const metadata = await metadataProvider.getEpisodeDetails(
+              seriesId,
+              item.match.season ?? 1,
+              item.match.episode ?? 1
+            );
+
+            completed++;
+            // 发送进度更新
+            event.sender.send('metadata-progress', { current: completed, total });
+
+            return {
+              ...item,
+              match: {
+                ...item.match,  // 保留所有原有字段，包括 totalEpisodes, originalEpisode 等
+              },
+              metadata: metadata || undefined
+            };
+          } catch (e) {
+            console.error(`Failed to fetch metadata for ${item.file.name}:`, e);
+            completed++;
+            event.sender.send('metadata-progress', { current: completed, total });
+            return item;
+          }
+        });
+
+        return await Promise.all(promises);
+      };
+
+      // 分批处理
+      for (let i = 0; i < matches.length; i += concurrencyLimit) {
+        const batch = matches.slice(i, i + concurrencyLimit);
+        const batchNum = Math.floor(i / concurrencyLimit) + 1;
+        const totalBatches = Math.ceil(matches.length / concurrencyLimit);
+        console.log(`[元数据获取] 批次 ${batchNum}/${totalBatches} (共 ${batch.length} 集)`);
+        const batchResults = await processBatch(batch);
+        updatedMatches.push(...batchResults);
+      }
+
+      console.log(`[元数据获取] 完成！共处理 ${total} 个文件`);
+      return { success: true, matches: updatedMatches };
+    } catch (e: any) {
+      console.error('[元数据获取] 错误:', e);
+      return { success: false, error: e.message };
+    }
+  });
+
+  ipcMain.handle('scanner:smart-identify', async (_, { unmatchedFiles }) => {
+    try {
+      const results = [];
+
+      for (const fileData of unmatchedFiles) {
+        try {
+          // 尝试 LLM 识别
+          const match = await llmEngine.match(fileData.file.name);
+          results.push({
+            ...fileData,
+            match: match.success ? match : {
+              success: false,
+              seriesName: null,
+              season: null,
+              episode: null,
+              source: 'llm_failed'
+            }
+          });
+        } catch (e) {
+          console.error(`LLM识别失败: ${fileData.file.name}:`, e);
+          results.push({
+            ...fileData,
+            match: { success: false, source: 'llm_error' }
+          });
+        }
+      }
+
+      return { success: true, results };
+    } catch (e: any) {
+      return { success: false, error: e.message };
+    }
+  });
+
   ipcMain.handle('rules:get', async () => {
     const defaultPath = path.join(process.env.DIST_ELECTRON || '', 'resources/default_rules.json');
     const userPath = path.join(app.getPath('userData'), 'custom_rules.json');

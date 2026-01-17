@@ -197,7 +197,8 @@ export class ScannerService {
             success: true,
             seriesName: resolveResult.seriesName,
             season: resolveResult.season ?? 1,
-            episode: match?.episode ?? 1, // Default to 1 if not matched, user can fix
+            episode: match?.episode ?? 1,
+            originalEpisode: match?.episode ?? 1,  // 保存原始集数
             source: 'llm_context'
           }
         });
@@ -214,7 +215,7 @@ export class ScannerService {
     }
   }
 
-  private async processSeriesGroup(source: IMediaSource, seriesName: string, items: any[]) {
+  private async processSeriesGroup(source: IMediaSource, seriesName: string, items: any[], skipMetadata: boolean = false) {
     let seriesInfo = this.showMetadataCache.get(seriesName);
     let currentSearchName = seriesName;
     let confirmedSeriesName = seriesName; // 保存用户确认的剧集名称
@@ -253,30 +254,69 @@ export class ScannerService {
     }
 
     const tmdbId = seriesInfo.id;
-    const seasonsInGroup = new Set<number>(items.map(i => i.match.season ?? 1));
-    const seasonCache: Map<number, any[]> = new Map();
 
-    for (const seasonNum of seasonsInGroup) {
-      this.log(`正在获取第 ${seasonNum} 季的元数据...`);
-      const episodes = await this.metadataProvider.getSeasonDetails(tmdbId, seasonNum);
-      seasonCache.set(seasonNum, episodes);
-    }
+    let matchedItems;
+    if (skipMetadata) {
+      // 跳过元数据获取，但仍需获取季总集数用于文件名格式
+      const seasonsInGroup = new Set<number>(items.map(i => i.match.season ?? 1));
+      const seasonEpisodeCounts: Map<number, number> = new Map();
 
-    const matchedItems = [];
-    for (const item of items) {
-      const currentSeason = item.match.season ?? 1;
-      const seasonData = seasonCache.get(currentSeason) || [];
-      let epData = seasonData.find(e => e.episodeNumber === item.match.episode);
-
-      // Fuzzy Match if needed (though LLM context should have done it)
-      if (!epData && seasonData.length > 0) {
-        const bestEpisodeNumber = await this.llmEngine.matchEpisodeFromList(item.file.name, seasonData);
-        if (bestEpisodeNumber !== null) {
-          epData = seasonData.find(e => e.episodeNumber === bestEpisodeNumber);
-          if (epData) item.match.episode = bestEpisodeNumber;
+      for (const seasonNum of seasonsInGroup) {
+        try {
+          const episodes = await this.metadataProvider.getSeasonDetails(tmdbId, seasonNum);
+          seasonEpisodeCounts.set(seasonNum, episodes.length);
+        } catch (e) {
+          console.error(`Failed to get season ${seasonNum} details:`, e);
         }
       }
-      matchedItems.push({ ...item, metadata: epData, tmdbId });
+
+      matchedItems = items.map(item => ({
+        ...item,
+        tmdbId,
+        match: {
+          ...item.match,
+          totalEpisodes: seasonEpisodeCounts.get(item.match.season ?? 1) || 0
+        },
+        metadata: undefined
+      }));
+    } else {
+      // 原有逻辑：获取元数据
+      const seasonsInGroup = new Set<number>(items.map(i => i.match.season ?? 1));
+      const seasonCache: Map<number, any[]> = new Map();
+      const seasonEpisodeCounts: Map<number, number> = new Map();  // 保存每季的总集数
+
+      for (const seasonNum of seasonsInGroup) {
+        this.log(`正在获取第 ${seasonNum} 季的元数据...`);
+        const episodes = await this.metadataProvider.getSeasonDetails(tmdbId, seasonNum);
+        seasonCache.set(seasonNum, episodes);
+        seasonEpisodeCounts.set(seasonNum, episodes.length);  // 记录总集数
+      }
+
+      matchedItems = [];
+      for (const item of items) {
+        const currentSeason = item.match.season ?? 1;
+        const seasonData = seasonCache.get(currentSeason) || [];
+        const totalEpisodes = seasonEpisodeCounts.get(currentSeason) || 0;  // 获取总集数
+        let epData = seasonData.find(e => e.episodeNumber === item.match.episode);
+
+        // Fuzzy Match if needed (though LLM context should have done it)
+        if (!epData && seasonData.length > 0) {
+          const bestEpisodeNumber = await this.llmEngine.matchEpisodeFromList(item.file.name, seasonData);
+          if (bestEpisodeNumber !== null) {
+            epData = seasonData.find(e => e.episodeNumber === bestEpisodeNumber);
+            if (epData) item.match.episode = bestEpisodeNumber;
+          }
+        }
+        matchedItems.push({
+          ...item,
+          metadata: epData,
+          tmdbId,
+          match: {
+            ...item.match,
+            totalEpisodes  // 添加总集数
+          }
+        });
+      }
     }
 
     const { confirmed, options, selectedIndices, updatedMatches } = await this.requestEpisodesConfirmation(confirmedSeriesName, matchedItems);
@@ -300,7 +340,10 @@ export class ScannerService {
       for (const item of itemsToProcess) {
         if (item.metadata) {
           const fileExt = path.posix.extname(item.file.name);
-          const newName = `${seriesName} - S${String(item.match.season).padStart(2, '0')}E${String(item.match.episode).padStart(2, '0')} - ${item.metadata.title}${fileExt}`;
+          // 根据总集数动态决定集数位数
+          const episodeDigits = Math.max(2, String(item.match.totalEpisodes || 0).length);
+          console.log(`[重命名] S${item.match.season}E${item.match.episode} - totalEpisodes: ${item.match.totalEpisodes}, digits: ${episodeDigits}`);
+          const newName = `${seriesName} - S${String(item.match.season).padStart(2, '0')}E${String(item.match.episode).padStart(episodeDigits, '0')} - ${item.metadata.title}${fileExt}`;
           if (item.file.name !== newName) renameObjects.push({ src_name: item.file.name, new_name: newName });
         }
       }
@@ -403,7 +446,7 @@ export class ScannerService {
         return;
       }
 
-      await this.processFileList(source, fileItems, videoExtensions);
+      await this.processFileList(source, fileItems, videoExtensions, true);
 
     } catch (e: any) {
       this.log(`扫描失败: ${e.message}`, 'error');
@@ -429,7 +472,7 @@ export class ScannerService {
     finally { this._isScanning = false; this.log('扫描完成'); this.mainWindow?.webContents.send('scanner-finished'); }
   }
 
-  private async processFileList(source: IMediaSource, allFiles: any[], videoExtensions: string) {
+  private async processFileList(source: IMediaSource, allFiles: any[], videoExtensions: string, skipMetadata: boolean = false, skipLLM: boolean = true) {
     const extPattern = videoExtensions.split(',').map(e => e.trim()).filter(e => e).join('|');
     const videoRegex = new RegExp(`\.(${extPattern})$`, 'i');
     const videoFiles = allFiles.filter(f => !f.isDir && videoRegex.test(f.name));
@@ -453,37 +496,74 @@ export class ScannerService {
       for (const file of filesInDir) {
         const match = await this.regexEngine.match(file.name);
         if (match.success) {
-          dirResults.push({ file, match });
+          dirResults.push({
+            file,
+            match: {
+              ...match,
+              originalEpisode: match.episode  // 保存正则识别的原始集数
+            }
+          });
         } else {
           unmatchedFiles.push(file);
         }
       }
 
-      // If many files are unmatched in this dir, try directory-level resolution
+      // If many files are unmatched in this dir
       if (unmatchedFiles.length > 0) {
-        this.log(`正在尝试对目录 ${dir} (${unmatchedFiles.length} 个文件) 进行智能识别...`);
-        const dirResolve = await this.llmEngine.resolveDirectory(dir, unmatchedFiles.map(f => f.name));
-
-        if (dirResolve.seriesName) {
+        if (skipLLM) {
+          // 跳过 LLM，标记为未识别
           for (const unmatched of unmatchedFiles) {
-            const fileMatch = dirResolve.matches?.find(m => m.filename === unmatched.name);
+            // 尝试从文件名中提取数字作为集数
+            const nameWithoutExt = unmatched.name.replace(/\.[^.]+$/, '');
+            const numbers = nameWithoutExt.match(/\d+/g);
+            let episode = null;
+            let originalEpisode = null;
+
+            // 如果找到数字，使用最后一个作为集数（通常是集数）
+            if (numbers && numbers.length > 0) {
+              episode = parseInt(numbers[numbers.length - 1], 10);
+              originalEpisode = episode;
+            }
+
             dirResults.push({
               file: unmatched,
               match: {
-                success: true,
-                seriesName: dirResolve.seriesName,
-                season: dirResolve.season ?? 1,
-                episode: fileMatch?.episode,
-                source: 'llm_dir'
+                success: false,
+                seriesName: null,
+                season: null,
+                episode,
+                originalEpisode,
+                source: 'unmatched'
               }
             });
           }
         } else {
-          // Fallback to individual LLM calls
-          for (const unmatched of unmatchedFiles) {
-            this.log(`正则匹配失败: ${unmatched.name}, 正在请求 LLM 识别...`);
-            const match = await this.llmEngine.match(unmatched.name);
-            dirResults.push({ file: unmatched, match });
+          // 使用 LLM 识别
+          this.log(`正在尝试对目录 ${dir} (${unmatchedFiles.length} 个文件) 进行智能识别...`);
+          const dirResolve = await this.llmEngine.resolveDirectory(dir, unmatchedFiles.map(f => f.name));
+
+          if (dirResolve.seriesName) {
+            for (const unmatched of unmatchedFiles) {
+              const fileMatch = dirResolve.matches?.find(m => m.filename === unmatched.name);
+              dirResults.push({
+                file: unmatched,
+                match: {
+                  success: true,
+                  seriesName: dirResolve.seriesName,
+                  season: dirResolve.season ?? 1,
+                  episode: fileMatch?.episode,
+                  originalEpisode: fileMatch?.episode,  // 保存原始集数
+                  source: 'llm_dir'
+                }
+              });
+            }
+          } else {
+            // Fallback to individual LLM calls
+            for (const unmatched of unmatchedFiles) {
+              this.log(`正则匹配失败: ${unmatched.name}, 正在请求 LLM 识别...`);
+              const match = await this.llmEngine.match(unmatched.name);
+              dirResults.push({ file: unmatched, match });
+            }
           }
         }
       }
@@ -495,12 +575,24 @@ export class ScannerService {
           const cleanName = match.seriesName.replace(/[-\s._]+$/, '').trim();
           if (!groups.has(cleanName)) groups.set(cleanName, []);
           groups.get(cleanName)?.push(res);
+        } else if (match.source === 'unmatched') {
+          // 未匹配文件也需要分组显示，使用目录名作为临时剧集名
+          const dir = path.posix.dirname(res.file.path);
+          const dirName = path.posix.basename(dir) || 'Unknown';
+          const groupKey = `[未识别] ${dirName}`;
+          if (!groups.has(groupKey)) groups.set(groupKey, []);
+          groups.get(groupKey)?.push(res);
         }
       }
     }
 
     for (const [seriesName, items] of groups.entries()) {
-      await this.processSeriesGroup(source, seriesName, items);
+      // 检测并清理未识别文件的分组名
+      let cleanSeriesName = seriesName;
+      if (seriesName.startsWith('[未识别] ')) {
+        cleanSeriesName = seriesName.replace('[未识别] ', '');
+      }
+      await this.processSeriesGroup(source, cleanSeriesName, items, skipMetadata);
     }
   }
 }

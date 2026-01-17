@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useAppStore, LogType } from './stores/appStore';
-import { Settings, Database, Globe, Play, Eye, EyeOff, CheckCircle2, AlertCircle, RefreshCw, Save, ArrowRight, Minus, Square, X, Folder, Network, Zap, File, Clapperboard, ChevronUp, ChevronDown, LayoutGrid, List, Wand2, Sun, Moon, ArrowLeft, CornerLeftUp, Check, Calendar, Clock, Trash2, Download } from 'lucide-react';
+import { Settings, Database, Globe, Play, Eye, EyeOff, CheckCircle2, AlertCircle, RefreshCw, Save, ArrowRight, Minus, Square, X, Folder, Network, Zap, File, Clapperboard, ChevronUp, ChevronDown, LayoutGrid, List, Wand2, Sun, Moon, ArrowLeft, CornerLeftUp, Check, Calendar, Clock, Trash2, Download, Sparkles } from 'lucide-react';
 import clsx from 'clsx';
 
 const StatusMessage = ({ result }: { result: { success: boolean; message: string } | null }) => {
@@ -129,7 +129,13 @@ export default function App() {
 
   // Wizard
   const [wizardStage, setWizardWizardStage] = useState<'idle' | 'series' | 'loading_episodes' | 'episodes' | 'executing' | 'finished'>('idle');
-  const [wizardData, setWizardData] = useState<{ detectedName?: string, seriesResults?: any[], seriesName?: string, matches?: any[] }>({});
+  const [wizardData, setWizardData] = useState<{
+    detectedName?: string,
+    seriesResults?: any[],
+    seriesName?: string,
+    seriesId?: string,  // TMDB ID
+    matches?: any[]
+  }>({});
   const [scrapeProgress, setScrapeProgress] = useState<{ percent: number, message: string }>({ percent: 0, message: '' });
   const [selectedIndices, setSelectedIndices] = useState<number[]>([]);
   const [batchOptions, setBatchOptions] = useState({ rename: true, writeNfo: true, writePoster: true, writeStill: true });
@@ -139,6 +145,20 @@ export default function App() {
   const [editingMatchIndex, setEditingMatchIndex] = useState<number | null>(null);
   const [editMatchValues, setEditMatchValues] = useState({ season: 1, episode: 1 });
   const [manualSeriesName, setManualSeriesName] = useState('');
+
+  // Batch edit states
+  const [batchEditMode, setBatchEditMode] = useState<'season' | 'episode' | null>(null);
+  const [batchSeasonValue, setBatchSeasonValue] = useState(1);
+  const [anchorIndex, setAnchorIndex] = useState<number | null>(null);
+  const [anchorEpisode, setAnchorEpisode] = useState(1);
+
+  // Metadata fetch states
+  const [metadataFetched, setMetadataFetched] = useState(false);
+  const [fetchingMetadata, setFetchingMetadata] = useState(false);
+  const [metadataProgress, setMetadataProgress] = useState({ current: 0, total: 0 });
+
+  // Smart identify states
+  const [smartIdentifying, setSmartIdentifying] = useState(false);
 
   // Local input mirror
   const [proxyInput, setProxyInput] = useState('');
@@ -166,6 +186,8 @@ export default function App() {
 
   // Initial Configuration Loading
   useEffect(() => {
+    if (!window.ipcRenderer) return;
+
     const loadConfig = async () => {
       try {
         const version = await window.ipcRenderer.invoke('app:getVersion');
@@ -225,7 +247,12 @@ export default function App() {
       setWizardWizardStage('series');
     };
     const handleEpisodesConfirmation = (data: any) => {
-      setWizardData(prev => ({ ...prev, seriesName: data.seriesName, matches: data.matches }));
+      setWizardData(prev => ({
+        ...prev,
+        seriesName: data.seriesName,
+        seriesId: data.seriesId || (data.matches && data.matches[0]?.tmdbId),
+        matches: data.matches
+      }));
       setSelectedIndices(data.matches.map((_: any, i: number) => i));
       setWizardWizardStage('episodes');
     };
@@ -253,6 +280,24 @@ export default function App() {
       if (typeof cleanupEpConf === 'function') (cleanupEpConf as any)();
       if (typeof cleanupProgress === 'function') (cleanupProgress as any)();
       if (typeof cleanupDlProgress === 'function') (cleanupDlProgress as any)();
+    };
+  }, []);
+
+  // 监听元数据获取进度
+  useEffect(() => {
+    if (!window.ipcRenderer) return;
+
+    const handleProgress = (_: any, progress: { current: number; total: number }) => {
+      console.log('[前端] 收到进度更新:', progress);
+      setMetadataProgress(progress);
+    };
+
+    const cleanup = window.ipcRenderer.on('metadata-progress', handleProgress);
+
+    return () => {
+      if (cleanup && typeof cleanup === 'function') {
+        (cleanup as () => void)();
+      }
     };
   }, []);
 
@@ -352,6 +397,154 @@ export default function App() {
       }
     } catch (e) {
       console.error('Failed to fetch metadata for manual match:', e);
+    }
+  };
+
+  const handleBatchSeasonUpdate = async () => {
+    if (!wizardData.matches) return;
+
+    const newMatches = [...wizardData.matches];
+
+    for (const idx of selectedIndices) {
+      newMatches[idx] = {
+        ...newMatches[idx],
+        match: { ...newMatches[idx].match, season: batchSeasonValue }
+      };
+    }
+
+    setWizardData(prev => ({ ...prev, matches: newMatches }));
+    setBatchEditMode(null);
+  };
+
+  const handleBatchEpisodeUpdate = async () => {
+    if (anchorIndex === null || !wizardData.matches) return;
+
+    // 获取锚点的原始集数
+    const anchorOriginalEpisode = wizardData.matches[anchorIndex].match.originalEpisode;
+
+    // 如果锚点没有原始集数，回退到基于位置的计算
+    if (!anchorOriginalEpisode) {
+      const sortedIndices = [...selectedIndices].sort((a, b) => a - b);
+      const anchorPositionInSelection = sortedIndices.indexOf(anchorIndex);
+      if (anchorPositionInSelection === -1) return;
+
+      const newMatches = [...wizardData.matches];
+      for (let i = 0; i < sortedIndices.length; i++) {
+        const idx = sortedIndices[i];
+        const offset = i - anchorPositionInSelection;
+        const newEpisode = anchorEpisode + offset;
+        newMatches[idx] = {
+          ...newMatches[idx],
+          match: { ...newMatches[idx].match, episode: newEpisode }
+        };
+      }
+      setWizardData(prev => ({ ...prev, matches: newMatches }));
+      setBatchEditMode(null);
+      setAnchorIndex(null);
+
+      // 使用更新后的数据获取元数据
+      setTimeout(() => {
+        handleFetchMetadataWithData(newMatches, wizardData.seriesId!);
+      }, 100);
+      return;
+    }
+
+    // 基于原始集数计算偏移
+    const newMatches = [...wizardData.matches];
+
+    for (const idx of selectedIndices) {
+      const item = wizardData.matches[idx];
+      const itemOriginalEpisode = item.match.originalEpisode;
+
+      // 如果该文件没有原始集数，跳过
+      if (!itemOriginalEpisode) continue;
+
+      // 计算该文件相对于锚点的偏移
+      const offset = itemOriginalEpisode - anchorOriginalEpisode;
+      const newEpisode = anchorEpisode + offset;
+
+      newMatches[idx] = {
+        ...newMatches[idx],
+        match: { ...newMatches[idx].match, episode: newEpisode }
+      };
+    }
+
+    setWizardData(prev => ({ ...prev, matches: newMatches }));
+    setBatchEditMode(null);
+    setAnchorIndex(null);
+
+    // 自动获取元数据
+    setTimeout(() => handleFetchMetadataWithData(newMatches, wizardData.seriesId!), 100);
+  };
+
+  const handleFetchMetadataWithData = async (matches: any[], seriesId: string) => {
+    if (!matches || !seriesId || fetchingMetadata) return;
+
+    setFetchingMetadata(true);
+    setMetadataProgress({ current: 0, total: matches.length });
+
+    try {
+      const result = await window.ipcRenderer.invoke('scanner:fetch-metadata', {
+        matches,
+        seriesId
+      });
+
+      if (result.success) {
+        setWizardData(prev => ({ ...prev, matches: result.matches }));
+        setMetadataFetched(true);
+      } else {
+        console.error('Failed to fetch metadata:', result.error);
+      }
+    } catch (e) {
+      console.error('Error fetching metadata:', e);
+    } finally {
+      setFetchingMetadata(false);
+      setMetadataProgress({ current: 0, total: 0 });
+    }
+  };
+
+  const handleFetchMetadata = async () => {
+    if (!wizardData.matches || !wizardData.seriesId || fetchingMetadata) return;
+
+    setFetchingMetadata(true);
+
+    try {
+      const result = await window.ipcRenderer.invoke('scanner:fetch-metadata', {
+        matches: wizardData.matches,
+        seriesId: wizardData.seriesId
+      });
+
+      if (result.success) {
+        setWizardData(prev => ({ ...prev, matches: result.matches }));
+        setMetadataFetched(true);
+      } else {
+        console.error('Failed to fetch metadata:', result.error);
+      }
+    } catch (e) {
+      console.error('Error fetching metadata:', e);
+    } finally {
+      setFetchingMetadata(false);
+    }
+  };
+
+  const handleSmartIdentify = async () => {
+    if (!wizardData.matches || smartIdentifying) return;
+    const unmatched = wizardData.matches.filter((item: any) => !item.match.success || item.match.source === 'unmatched');
+    if (unmatched.length === 0) return;
+    setSmartIdentifying(true);
+    try {
+      const result = await window.ipcRenderer.invoke('scanner:smart-identify', { unmatchedFiles: unmatched });
+      if (result.success) {
+        const newMatches = wizardData.matches.map((item: any) => {
+          const smartResult = result.results.find((r: any) => r.file.path === item.file.path);
+          return smartResult || item;
+        });
+        setWizardData(prev => ({ ...prev, matches: newMatches }));
+      }
+    } catch (e) {
+      console.error('Smart identify error:', e);
+    } finally {
+      setSmartIdentifying(false);
     }
   };
 
@@ -1197,13 +1390,114 @@ export default function App() {
                     ))}
                   </div>
                 </div>
+                {/* Batch Edit Actions */}
+                {selectedIndices.length > 1 && (
+                  <div className="px-6 py-3 bg-amber-50 dark:bg-amber-900/10 border-b border-amber-200 dark:border-amber-900/30">
+                    <div className="flex items-center gap-3">
+                      <span className="text-xs font-bold text-amber-700 dark:text-amber-400">
+                        批量操作 ({selectedIndices.length} 个文件)
+                      </span>
+                      <button
+                        onClick={() => {
+                          setBatchEditMode('season');
+                          if (wizardData.matches && selectedIndices.length > 0) {
+                            setBatchSeasonValue(wizardData.matches[selectedIndices[0]].match.season ?? 1);
+                          }
+                        }}
+                        className="px-3 py-1.5 bg-blue-600 hover:bg-blue-500 text-white rounded-lg text-xs font-bold shadow-sm transition-all"
+                      >
+                        批量改季
+                      </button>
+                      <button
+                        onClick={() => {
+                          setBatchEditMode('episode');
+                          if (wizardData.matches && selectedIndices.length > 0) {
+                            const firstIdx = selectedIndices[0];
+                            setAnchorIndex(firstIdx);
+                            setAnchorEpisode(wizardData.matches[firstIdx].match.episode ?? 1);
+                          }
+                        }}
+                        className="px-3 py-1.5 bg-green-600 hover:bg-green-500 text-white rounded-lg text-xs font-bold shadow-sm transition-all"
+                      >
+                        智能改集
+                      </button>
+                    </div>
+                  </div>
+                )}
+                {/* Smart Identify Button */}
+                {wizardData.matches && wizardData.matches.some((item: any) => !item.match.success || item.match.source === 'unmatched') && (
+                  <div className="px-6 py-3 bg-amber-50 dark:bg-amber-900/10 border-b border-amber-200 dark:border-amber-900/30">
+                    <button
+                      onClick={handleSmartIdentify}
+                      disabled={smartIdentifying}
+                      className="px-4 py-2 bg-amber-600 hover:bg-amber-500 text-white rounded-lg text-sm font-bold shadow-sm transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+                    >
+                      {smartIdentifying ? (
+                        <>
+                          <RefreshCw className="w-4 h-4 animate-spin" />
+                          正在智能识别...
+                        </>
+                      ) : (
+                        <>
+                          <Sparkles className="w-4 h-4" />
+                          智能识别未匹配文件
+                        </>
+                      )}
+                    </button>
+                    <p className="text-xs text-slate-400 mt-2">
+                      使用 AI 识别正则匹配失败的文件（共 {wizardData.matches.filter((item: any) => !item.match.success || item.match.source === 'unmatched').length} 个）
+                    </p>
+                  </div>
+                )}
+                {/* Fetch Metadata Button */}
+                {!metadataFetched && !fetchingMetadata && wizardData.matches && wizardData.matches.some((item: any) => !item.metadata) && (
+                  <div className="px-6 py-3 bg-blue-50 dark:bg-blue-900/10 border-b border-blue-200 dark:border-blue-900/30">
+                    <button
+                      onClick={handleFetchMetadata}
+                      className="px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white rounded-lg text-sm font-bold shadow-sm transition-all flex items-center gap-2"
+                    >
+                      <Download className="w-4 h-4" />
+                      获取元数据
+                    </button>
+                    <p className="text-xs text-slate-400 mt-2">
+                      确认季集无误后，点击此按钮获取TMDB元数据
+                    </p>
+                  </div>
+                )}
+                {/* Global Loading Overlay for Metadata Fetch */}
+                {fetchingMetadata && (
+                  <div className="px-6 py-4 bg-gradient-to-r from-blue-50 to-cyan-50 dark:from-blue-900/20 dark:to-cyan-900/20 border-b border-blue-200 dark:border-blue-800">
+                    <div className="flex items-center gap-3">
+                      <RefreshCw className="w-5 h-5 text-blue-600 dark:text-blue-400 animate-spin" />
+                      <div className="flex-1">
+                        <p className="text-sm font-bold text-blue-900 dark:text-blue-100">正在获取元数据</p>
+                        <p className="text-xs text-blue-600 dark:text-blue-400">
+                          {metadataProgress?.total > 0 ? (
+                            `已获取 ${metadataProgress.current}/${metadataProgress.total} 集`
+                          ) : (
+                            '从 TMDB 获取剧集详情中，请稍候...'
+                          )}
+                        </p>
+                      </div>
+                      {metadataProgress?.total > 0 && (
+                        <div className="text-right">
+                          <div className="text-lg font-bold text-blue-600 dark:text-blue-400">
+                            {Math.round((metadataProgress.current / metadataProgress.total) * 100)}%
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                )}
                 <div className="flex-1 overflow-y-auto max-h-[60vh]">
                   <table className="w-full text-left border-collapse">
                     <thead className="sticky top-0 bg-white border-b border-slate-200 text-[10px] font-bold text-slate-400 uppercase"><tr><th className="px-6 py-3 w-12"><input type="checkbox" checked={selectedIndices.length === wizardData.matches?.length} onChange={toggleSelectIndicesAll} /></th><th>预览</th><th className="w-24">识别结果</th><th>元数据</th></tr></thead>
                     <tbody className="divide-y divide-slate-200">
                       {wizardData.matches?.map((item: any, idx: number) => {
                         const fileExt = item.file.name.substring(item.file.name.lastIndexOf('.'));
-                        const newName = item.metadata ? `${wizardData.seriesName} - S${String(item.match.season ?? 1).padStart(2, '0')}E${String(item.match.episode ?? 1).padStart(2, '0')} - ${item.metadata.title}${fileExt}` : '';
+                        // 根据总集数自动计算需要的位数（最少2位）
+                        const episodeDigits = Math.max(2, String(item.match.totalEpisodes || 0).length);
+                        const newName = item.metadata ? `${wizardData.seriesName} - S${String(item.match.season ?? 1).padStart(2, '0')}E${String(item.match.episode ?? 1).padStart(episodeDigits, '0')} - ${item.metadata.title}${fileExt}` : '';
                         return (
                           <tr key={idx} className={clsx(!selectedIndices.includes(idx) && "opacity-50")}>
                             <td className="px-6 py-4"><input type="checkbox" checked={selectedIndices.includes(idx)} onChange={() => toggleIndex(idx)} /></td>
@@ -1216,7 +1510,7 @@ export default function App() {
                                 onClick={() => { setEditingMatchIndex(idx); setEditMatchValues({ season: item.match.season ?? 1, episode: item.match.episode ?? 1 }); }}
                                 className="px-2 py-1 rounded hover:bg-slate-100 dark:hover:bg-slate-800 text-xs font-bold text-slate-500 hover:text-blue-600 transition-colors border border-transparent hover:border-blue-200"
                               >
-                                S{String(item.match.season ?? 1).padStart(2, '0')}E{String(item.match.episode ?? 1).padStart(2, '0')}
+                                S{String(item.match.season ?? 1).padStart(2, '0')}E{String(item.match.episode ?? 1).padStart(Math.max(2, String(item.match.totalEpisodes || 0).length), '0')}
                               </button>
                             </td>
                             <td className="px-6 py-4 cursor-pointer" onClick={() => handleShowEpisodeDetail(item)}>{item.metadata ? <div className="flex items-center gap-2">{item.metadata.stillPath && <img src={item.metadata.stillPath} className="w-10 h-6 object-cover rounded" alt="" />}<div className="text-xs font-bold text-blue-600 truncate">{item.metadata.title}</div></div> : <span className="text-[10px] text-red-400">无元数据</span>}</td>
@@ -1275,6 +1569,110 @@ export default function App() {
                 <button onClick={() => setEditingMatchIndex(null)} className="flex-1 px-4 py-3 rounded-xl font-bold text-sm text-slate-500 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 transition-colors">取消</button>
                 <button onClick={handleManualMatchUpdate} className="flex-1 px-4 py-3 rounded-xl font-bold text-sm text-white bg-blue-600 hover:bg-blue-500 shadow-lg shadow-blue-500/30 transition-all">确认</button>
               </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Batch Season Edit Modal */}
+      {batchEditMode === 'season' && (
+        <div className="fixed inset-0 z-[400] flex items-center justify-center bg-slate-950/50 backdrop-blur-sm p-6 animate-in fade-in duration-200">
+          <div className="bg-white dark:bg-slate-900 w-full max-w-md rounded-2xl shadow-2xl overflow-hidden border border-slate-200 dark:border-slate-800">
+            <div className="p-6 border-b border-slate-200 dark:border-slate-800 flex justify-between items-center">
+              <h3 className="text-lg font-bold">批量修改季</h3>
+              <button onClick={() => setBatchEditMode(null)} className="p-1 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-full"><X className="w-4 h-4" /></button>
+            </div>
+            <div className="p-8 space-y-6">
+              <p className="text-sm text-slate-600 dark:text-slate-300">
+                将 <span className="font-bold text-blue-600">{selectedIndices.length}</span> 个文件的季统一修改为：
+              </p>
+              <div className="space-y-2">
+                <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">季 (Season)</label>
+                <input
+                  type="number"
+                  min="0"
+                  value={batchSeasonValue}
+                  onChange={e => setBatchSeasonValue(parseInt(e.target.value) ?? 1)}
+                  className="w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl px-4 py-3 text-lg font-bold outline-none focus:ring-2 ring-blue-500/20 transition-all"
+                />
+              </div>
+              <p className="text-[10px] text-slate-400 italic">修改后将更新预览，元数据将在点击"执行"时统一获取。</p>
+              <div className="flex gap-3 pt-4">
+                <button onClick={() => setBatchEditMode(null)} className="flex-1 px-4 py-3 rounded-xl font-bold text-sm text-slate-500 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 transition-colors">取消</button>
+                <button onClick={handleBatchSeasonUpdate} className="flex-1 px-4 py-3 rounded-xl font-bold text-sm text-white bg-blue-600 hover:bg-blue-500 shadow-lg shadow-blue-500/30 transition-all">确认</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Batch Episode Edit Modal */}
+      {batchEditMode === 'episode' && wizardData.matches && (
+        <div className="fixed inset-0 z-[400] flex items-center justify-center bg-slate-950/50 backdrop-blur-sm p-6 animate-in fade-in duration-200">
+          <div className="bg-white dark:bg-slate-900 w-full max-w-2xl rounded-2xl shadow-2xl overflow-hidden border border-slate-200 dark:border-slate-800">
+            <div className="p-6 border-b border-slate-200 dark:border-slate-800 flex justify-between items-center">
+              <div>
+                <h3 className="text-lg font-bold">智能批量修改集</h3>
+                <p className="text-xs text-slate-500 mt-1">选择一个文件作为基准，其他文件将根据偏移量自动调整</p>
+              </div>
+              <button onClick={() => { setBatchEditMode(null); setAnchorIndex(null); }} className="p-1 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-full"><X className="w-4 h-4" /></button>
+            </div>
+            <div className="p-6 space-y-4 max-h-[60vh] overflow-y-auto">
+              {selectedIndices.map(idx => {
+                const item = wizardData.matches![idx];
+                const originalEpisode = item.match.episode ?? 1;
+                const isAnchor = anchorIndex === idx;
+                const calculatedEpisode = anchorIndex !== null && !isAnchor
+                  ? originalEpisode + (anchorEpisode - (wizardData.matches![anchorIndex].match.episode ?? 1))
+                  : originalEpisode;
+
+                return (
+                  <div key={idx} className={clsx(
+                    "flex items-center justify-between p-4 rounded-xl border transition-all",
+                    isAnchor ? "bg-green-50 dark:bg-green-900/10 border-green-500" : "bg-slate-50 dark:bg-slate-800 border-slate-200 dark:border-slate-700"
+                  )}>
+                    <div className="flex-1 min-w-0 mr-4">
+                      <div className="text-xs font-bold text-slate-500">E{String(originalEpisode).padStart(2, '0')}</div>
+                      <div className="text-xs text-slate-400 truncate mt-1">{item.file.name}</div>
+                    </div>
+                    {isAnchor ? (
+                      <div className="flex items-center gap-2">
+                        <span className="text-xs font-bold text-green-600">→</span>
+                        <input
+                          type="number"
+                          min="1"
+                          value={anchorEpisode}
+                          onChange={e => setAnchorEpisode(parseInt(e.target.value) ?? 1)}
+                          className="w-20 bg-white dark:bg-slate-900 border border-green-500 rounded-lg px-3 py-2 text-sm font-bold outline-none focus:ring-2 ring-green-500/20"
+                        />
+                        <span className="text-xs font-bold text-green-600">（基准）</span>
+                      </div>
+                    ) : (
+                      <div className="flex items-center gap-2">
+                        <span className="text-xs font-bold text-blue-600">→ E{String(calculatedEpisode).padStart(2, '0')}</span>
+                        <button
+                          onClick={() => { setAnchorIndex(idx); setAnchorEpisode(originalEpisode); }}
+                          className="px-2 py-1 text-[10px] font-bold text-slate-500 hover:text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-900/20 rounded transition-colors"
+                        >
+                          设为基准
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+              {anchorIndex !== null && (
+                <div className="p-4 bg-blue-50 dark:bg-blue-900/10 border border-blue-200 dark:border-blue-900/30 rounded-xl">
+                  <div className="text-xs font-bold text-blue-700 dark:text-blue-400">
+                    偏移量：{anchorEpisode - (wizardData.matches[anchorIndex].match.episode ?? 1) > 0 ? '+' : ''}
+                    {anchorEpisode - (wizardData.matches[anchorIndex].match.episode ?? 1)}
+                  </div>
+                </div>
+              )}
+            </div>
+            <div className="p-6 border-t border-slate-200 dark:border-slate-800 flex gap-3">
+              <button onClick={() => { setBatchEditMode(null); setAnchorIndex(null); }} className="flex-1 px-4 py-3 rounded-xl font-bold text-sm text-slate-500 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 transition-colors">取消</button>
+              <button onClick={handleBatchEpisodeUpdate} disabled={anchorIndex === null} className="flex-1 px-4 py-3 rounded-xl font-bold text-sm text-white bg-green-600 hover:bg-green-500 shadow-lg shadow-green-500/30 transition-all disabled:opacity-50 disabled:cursor-not-allowed">确认</button>
             </div>
           </div>
         </div>
