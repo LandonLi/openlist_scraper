@@ -146,6 +146,10 @@ function registerIpcHandlers() {
       scannerService.setMetadataProvider(newMetadataProvider);
       scannerService.setProxy(currentProxyUrl);
 
+      // 设置 OpenList 批次大小
+      const batchSize = store.get('openlist_batch_size') as string || '20';
+      scannerService.setOpenListBatchSize(parseInt(batchSize, 10));
+
       const videoExtensions = store.get('video_extensions') as string || 'mkv,mp4,avi,mov,iso,rmvb';
       scannerService.scanSource(source, sourceConfig.path, videoExtensions).catch(err => console.error('Scan Error:', err));
       return { success: true };
@@ -167,6 +171,10 @@ function registerIpcHandlers() {
       const newMetadataProvider = MetadataFactory.create('tmdb', { apiKey: currentTmdbKey });
       scannerService.setMetadataProvider(newMetadataProvider);
 
+      // 设置 OpenList 批次大小
+      const batchSize = store.get('openlist_batch_size') as string || '20';
+      scannerService.setOpenListBatchSize(parseInt(batchSize, 10));
+
       const videoExtensions = store.get('video_extensions') as string || 'mkv,mp4,avi,mov,iso,rmvb';
       scannerService.scanSelectedFiles(source, sourceConfig.paths, videoExtensions).catch(err => console.error('Scan Selected Error:', err));
       return { success: true };
@@ -187,6 +195,10 @@ function registerIpcHandlers() {
       llmClient.configure({ apiKey: currentOpenaiKey, baseURL: currentOpenaiBase, model: currentOpenaiModel });
       const newMetadataProvider = MetadataFactory.create('tmdb', { apiKey: currentTmdbKey });
       scannerService.setMetadataProvider(newMetadataProvider);
+
+      // 设置 OpenList 批次大小
+      const batchSize = store.get('openlist_batch_size') as string || '20';
+      scannerService.setOpenListBatchSize(parseInt(batchSize, 10));
 
       const videoExtensions = store.get('video_extensions') as string || 'mkv,mp4,avi,mov,iso,rmvb';
       scannerService.identifySingleFile(source, sourceConfig.path, videoExtensions).catch(err => console.error('Identify Error:', err));

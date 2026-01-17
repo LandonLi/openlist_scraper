@@ -103,8 +103,58 @@ export class OpenListSource implements IMediaSource {
     }
   }
 
-  async batchRename(srcDir: string, renameObjects: Array<{ src_name: string, new_name: string }>): Promise<boolean> {
+  async batchRename(
+    srcDir: string,
+    renameObjects: Array<{ src_name: string, new_name: string }>,
+    batchSize: number = 20,
+    onProgress?: (current: number, total: number) => void
+  ): Promise<boolean> {
     if (!this.baseUrl) return false;
+
+    // 如果数量小于或等于批次大小，直接调用
+    if (renameObjects.length <= batchSize) {
+      const result = await this.executeSingleBatchRename(srcDir, renameObjects);
+      if (onProgress) onProgress(renameObjects.length, renameObjects.length);
+      return result;
+    }
+
+    // 分批处理
+    console.log(`[OpenList] 批量重命名: 共 ${renameObjects.length} 个文件，将分 ${Math.ceil(renameObjects.length / batchSize)} 批处理`);
+    let allSuccess = true;
+    let processedCount = 0;
+
+    for (let i = 0; i < renameObjects.length; i += batchSize) {
+      const batch = renameObjects.slice(i, i + batchSize);
+      const batchNum = Math.floor(i / batchSize) + 1;
+      const totalBatches = Math.ceil(renameObjects.length / batchSize);
+
+      console.log(`[OpenList] 处理批次 ${batchNum}/${totalBatches}: ${batch.length} 个文件`);
+
+      const success = await this.executeSingleBatchRename(srcDir, batch);
+      if (!success) {
+        allSuccess = false;
+        console.error(`[OpenList] 批次 ${batchNum} 失败`);
+      }
+
+      // 更新已处理数量并报告进度
+      processedCount += batch.length;
+      if (onProgress) {
+        onProgress(processedCount, renameObjects.length);
+      }
+
+      // 批次间延迟，避免请求过快
+      if (i + batchSize < renameObjects.length) {
+        await new Promise(resolve => setTimeout(resolve, 100));
+      }
+    }
+
+    return allSuccess;
+  }
+
+  private async executeSingleBatchRename(
+    srcDir: string,
+    renameObjects: Array<{ src_name: string, new_name: string }>
+  ): Promise<boolean> {
     try {
       const response = await this.api.post(`${this.baseUrl}/api/fs/batch_rename`, {
         src_dir: srcDir,

@@ -18,6 +18,7 @@ export class ScannerService {
   private showMetadataCache: Map<string, { id: string, poster?: string }> = new Map();
   private logLevel: 'info' | 'warn' | 'error' | 'debug' = 'info';
   private proxyUrl: string = '';
+  private openListBatchSize: number = 20;
 
   constructor(
     regexEngine: RegexEngine,
@@ -67,6 +68,10 @@ export class ScannerService {
     if (this.metadataProvider && typeof (this.metadataProvider as any).setProxy === 'function') {
       (this.metadataProvider as any).setProxy(proxyUrl);
     }
+  }
+
+  setOpenListBatchSize(size: number) {
+    this.openListBatchSize = size > 0 ? size : 20;
   }
 
   private log(message: string, type: 'info' | 'error' | 'success' | 'warn' | 'debug' = 'info') {
@@ -301,7 +306,20 @@ export class ScannerService {
       }
       if (renameObjects.length > 0) {
         const commonDir = path.posix.dirname(itemsToProcess[0].file.path);
-        const success = await source.batchRename(commonDir, renameObjects);
+        // 对 OpenList 源使用配置的批次大小，本地源传递一个大值（不分批）
+        const batchSize = source.type === 'openlist' ? this.openListBatchSize : 999999;
+
+        // 进度回调：根据实际重命名的文件数更新进度
+        const onRenameProgress = (current: number, total: number) => {
+          const subPercent = (current / total) * 100;
+          this.mainWindow?.webContents.send('scanner-operation-progress', {
+            percent: Math.round(subPercent / totalSteps),
+            message: `正在重命名文件... (${current}/${total})`,
+            finished: false
+          });
+        };
+
+        const success = await source.batchRename(commonDir, renameObjects, batchSize, onRenameProgress);
         if (success) {
           for (const item of itemsToProcess) {
             const renameInfo = renameObjects.find(r => r.src_name === item.file.name);

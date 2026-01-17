@@ -145,6 +145,7 @@ export default function App() {
   const [localPathInput, setLocalPathInput] = useState('');
   const [openListUrlInput, setOpenListUrlInput] = useState('');
   const [openListTokenInput, setOpenListTokenInput] = useState('');
+  const [openListBatchSizeInput, setOpenListBatchSizeInput] = useState('20');
   const [videoExtsInput, setVideoExtsInput] = useState('');
 
   // General Settings
@@ -194,6 +195,9 @@ export default function App() {
         if (sPath) { setConfig('localPath', sPath); setLocalPathInput(sPath); }
         if (sUrl) { setConfig('openListUrl', sUrl); setOpenListUrlInput(sUrl); }
         if (sToken) { setConfig('openListToken', sToken); setOpenListTokenInput(sToken); }
+        const oBatchSize = await window.ipcRenderer.invoke('config:get', 'openlist_batch_size');
+        if (oBatchSize) setOpenListBatchSizeInput(oBatchSize);
+        else setOpenListBatchSizeInput('20');
         if (vExts) { setVideoExtensions(vExts); setVideoExtsInput(vExts); }
         else { setVideoExtsInput('mkv,mp4,avi,mov,iso,rmvb'); }
         if (vMode) setViewMode(vMode);
@@ -413,6 +417,7 @@ export default function App() {
     await window.ipcRenderer.invoke('config:set', 'local_path', localPathInput);
     await window.ipcRenderer.invoke('config:set', 'openlist_url', openListUrlInput);
     await window.ipcRenderer.invoke('config:set', 'openlist_token', openListTokenInput);
+    await window.ipcRenderer.invoke('config:set', 'openlist_batch_size', openListBatchSizeInput);
     await window.ipcRenderer.invoke('config:set', 'video_extensions', videoExtsInput);
     await window.ipcRenderer.invoke('config:set', 'theme', theme);
     await window.ipcRenderer.invoke('config:set', 'log_level', logLevel);
@@ -1066,7 +1071,36 @@ export default function App() {
                   {sourceType === 'local' ? (
                     <div className="space-y-2"><label className="text-xs font-bold text-slate-400 uppercase tracking-widest">文件夹路径</label><div className="flex gap-2"><input type="text" value={localPathInput} onChange={e => setLocalPathInput(e.target.value)} className="flex-1 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-lg px-4 py-2 text-sm outline-none" /><button onClick={handleBrowseLocal} className="bg-slate-100 dark:bg-slate-800 px-4 py-2 rounded-lg text-xs font-bold flex items-center gap-2 border border-slate-200 dark:border-slate-700"><Folder className="w-4 h-4" /> 浏览</button></div></div>
                   ) : (
-                    <div className="space-y-4"><div className="space-y-2"><label className="text-xs font-bold text-slate-400 uppercase tracking-widest">服务器地址 (URL)</label><input type="text" value={openListUrlInput} onChange={e => setOpenListUrlInput(e.target.value)} className="w-full bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-lg px-4 py-2 text-sm outline-none" /></div><div className="space-y-2"><label className="text-xs font-bold text-slate-400 uppercase tracking-widest">访问令牌 (Token)</label><div className="relative"><input type={showOpenListToken ? "text" : "password"} value={openListTokenInput} onChange={e => setOpenListTokenInput(e.target.value)} className="w-full bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-lg pl-4 pr-10 py-2 text-sm outline-none" /><button onClick={() => setShowOpenListToken(!showOpenListToken)} className="absolute right-3 top-2.5 text-slate-400">{showOpenListToken ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}</button></div></div><TestButton onClick={handleTestOpenList} loading={isTestingOpenList} label="测试连接" /><StatusMessage result={openListTestResult} /></div>
+                    <div className="space-y-4">
+                      <div className="space-y-2">
+                        <label className="text-xs font-bold text-slate-400 uppercase tracking-widest">服务器地址 (URL)</label>
+                        <input type="text" value={openListUrlInput} onChange={e => setOpenListUrlInput(e.target.value)} className="w-full bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-lg px-4 py-2 text-sm outline-none" />
+                      </div>
+                      <div className="space-y-2">
+                        <label className="text-xs font-bold text-slate-400 uppercase tracking-widest">访问令牌 (Token)</label>
+                        <div className="relative">
+                          <input type={showOpenListToken ? "text" : "password"} value={openListTokenInput} onChange={e => setOpenListTokenInput(e.target.value)} className="w-full bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-lg pl-4 pr-10 py-2 text-sm outline-none" />
+                          <button onClick={() => setShowOpenListToken(!showOpenListToken)} className="absolute right-3 top-2.5 text-slate-400">{showOpenListToken ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}</button>
+                        </div>
+                      </div>
+                      <div className="space-y-2">
+                        <label className="block text-sm font-bold text-slate-700 dark:text-slate-300">批量重命名批次大小</label>
+                        <input
+                          type="number"
+                          min="1"
+                          max="100"
+                          value={openListBatchSizeInput}
+                          onChange={e => setOpenListBatchSizeInput(e.target.value)}
+                          placeholder="20"
+                          className="w-full bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-lg px-4 py-2 text-sm outline-none focus:ring-2 ring-blue-500/20"
+                        />
+                        <p className="text-xs text-slate-400">
+                          每批最多提交多少个文件的重命名请求（推荐 10-30，避免一次性提交过多导致失败）
+                        </p>
+                      </div>
+                      <TestButton onClick={handleTestOpenList} loading={isTestingOpenList} label="测试连接" />
+                      <StatusMessage result={openListTestResult} />
+                    </div>
                   )}
                 </section>
               )}

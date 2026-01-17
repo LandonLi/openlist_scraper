@@ -34,7 +34,7 @@ export class LocalSource implements IMediaSource {
 
   async listDir(dirPath: string): Promise<FileItem[]> {
     if (!this.rootPath) throw new Error('Source not connected');
-    
+
     // Ensure we don't escape rootPath
     const fullPath = path.resolve(this.rootPath, dirPath.replace(/^\/+/g, ''));
     if (!fullPath.startsWith(path.resolve(this.rootPath))) {
@@ -42,7 +42,7 @@ export class LocalSource implements IMediaSource {
     }
 
     const items = await fs.readdir(fullPath, { withFileTypes: true });
-    
+
     return Promise.all(items.map(async (item) => {
       const itemPath = path.join(fullPath, item.name);
       const relativePath = path.relative(this.rootPath, itemPath);
@@ -71,33 +71,33 @@ export class LocalSource implements IMediaSource {
 
   async rename(oldPath: string, newPath: string): Promise<boolean> {
     try {
-        await fs.rename(oldPath, newPath);
-        return true;
+      await fs.rename(oldPath, newPath);
+      return true;
     } catch (e) {
-        return false;
+      return false;
     }
   }
 
-  async batchRename(srcDir: string, renameObjects: Array<{ src_name: string, new_name: string }>): Promise<boolean> {
+  async batchRename(srcDir: string, renameObjects: Array<{ src_name: string, new_name: string }>, _batchSize?: number, _onProgress?: (current: number, total: number) => void): Promise<boolean> {
     try {
-        for (const obj of renameObjects) {
-            await fs.rename(
-                path.join(srcDir, obj.src_name),
-                path.join(srcDir, obj.new_name)
-            );
-        }
-        return true;
+      for (const obj of renameObjects) {
+        await fs.rename(
+          path.join(srcDir, obj.src_name),
+          path.join(srcDir, obj.new_name)
+        );
+      }
+      return true;
     } catch (e) {
-        return false;
+      return false;
     }
   }
 
   async writeFile(path: string, content: Buffer | string): Promise<boolean> {
     try {
-        await fs.outputFile(path, content);
-        return true;
+      await fs.outputFile(path, content);
+      return true;
     } catch (e) {
-        return false;
+      return false;
     }
   }
 }
