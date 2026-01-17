@@ -263,9 +263,20 @@ export default function App() {
 
   // Handlers
   const handleConfirmSeries = (seriesId: string | null) => {
-    window.ipcRenderer.send('scanner-confirm-response', { seriesId });
-    if (!seriesId) { setWizardWizardStage('idle'); setWizardData({}); }
-    else { setWizardWizardStage('loading_episodes'); }
+    // 找到用户选择的剧集对象,提取剧集名称
+    const selected = seriesId ? wizardData.seriesResults?.find((r: any) => r.id === seriesId) : null;
+
+    window.ipcRenderer.send('scanner-confirm-response', {
+      seriesId,
+      seriesName: selected?.title // 添加用户确认的剧集名称
+    });
+
+    if (!seriesId) {
+      setWizardWizardStage('idle');
+      setWizardData({});
+    } else {
+      setWizardWizardStage('loading_episodes');
+    }
   };
 
   const handleManualSearch = () => {

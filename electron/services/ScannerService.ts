@@ -87,13 +87,13 @@ export class ScannerService {
     this.log(`${message}${suffix} `, 'debug');
   }
 
-  private async requestUserConfirmation(detectedName: string, results: any[]): Promise<{ id: string, poster?: string, newName?: string } | null> {
+  private async requestUserConfirmation(detectedName: string, results: any[]): Promise<{ id: string, poster?: string, newName?: string, confirmedName?: string } | null> {
     if (!this.mainWindow) return null;
     return new Promise((resolve) => {
       setTimeout(() => {
         this.mainWindow?.webContents.send('scanner-require-confirmation', { detectedName, results });
       }, 200);
-      ipcMain.once('scanner-confirm-response', (_: any, response: { seriesId: string | null, newName?: string }) => {
+      ipcMain.once('scanner-confirm-response', (_: any, response: { seriesId: string | null, newName?: string, seriesName?: string }) => {
         // If user provided a new name to search
         if (response.newName) {
           resolve({ id: '', newName: response.newName });
@@ -101,7 +101,11 @@ export class ScannerService {
         }
 
         const selected = results.find(r => r.id === response.seriesId);
-        resolve(selected ? { id: selected.id, poster: selected.poster } : null);
+        resolve(selected ? {
+          id: selected.id,
+          poster: selected.poster,
+          confirmedName: response.seriesName || selected.name // 使用前端传来的名称或从结果中获取
+        } : null);
       });
     });
   }
@@ -208,6 +212,7 @@ export class ScannerService {
   private async processSeriesGroup(source: IMediaSource, seriesName: string, items: any[]) {
     let seriesInfo = this.showMetadataCache.get(seriesName);
     let currentSearchName = seriesName;
+    let confirmedSeriesName = seriesName; // 保存用户确认的剧集名称
 
     // Loop until we have series info or user cancels
     while (!seriesInfo) {
@@ -226,12 +231,17 @@ export class ScannerService {
 
       if (confirmed.id) {
         seriesInfo = { id: confirmed.id, poster: confirmed.poster };
-        this.showMetadataCache.set(seriesName, seriesInfo); // Cache by original name too? or new name?
-        // Maybe better to cache by the ID and have a map from name -> ID.
-        // For now, let's cache by the *original* series name so next time it hits, but subsequent calls to processSeriesGroup usually pass the same seriesName from the grouper.
-        // Actually, if we changed the name, we might want to update the cache for the NEW name too if that's what we want to use.
-        // But for this flow, sticking to current logic is fine.
-        this.showMetadataCache.set(seriesName, seriesInfo);
+        // 如果用户确认了剧集名称,使用确认的名称
+        if (confirmed.confirmedName) {
+          confirmedSeriesName = confirmed.confirmedName;
+          this.log(`使用用户确认的剧集名称: ${confirmedSeriesName}`, 'debug');
+        }
+        // 使用确认的名称作为缓存键
+        this.showMetadataCache.set(confirmedSeriesName, seriesInfo);
+        // 如果确认的名称与原始名称不同,也缓存原始名称以避免重复搜索
+        if (confirmedSeriesName !== seriesName) {
+          this.showMetadataCache.set(seriesName, seriesInfo);
+        }
       } else {
         return; // Should be covered by !confirmed check, but just safe guard
       }
@@ -264,9 +274,9 @@ export class ScannerService {
       matchedItems.push({ ...item, metadata: epData, tmdbId });
     }
 
-    const { confirmed, options, selectedIndices, updatedMatches } = await this.requestEpisodesConfirmation(seriesName, matchedItems);
+    const { confirmed, options, selectedIndices, updatedMatches } = await this.requestEpisodesConfirmation(confirmedSeriesName, matchedItems);
     if (confirmed && selectedIndices.length > 0) {
-      await this.executeBatch(source, seriesName, updatedMatches || matchedItems, selectedIndices, options, seriesInfo);
+      await this.executeBatch(source, confirmedSeriesName, updatedMatches || matchedItems, selectedIndices, options, seriesInfo);
     }
   }
 
