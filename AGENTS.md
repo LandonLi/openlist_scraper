@@ -96,6 +96,24 @@ This repository uses a lightweight GitHub-first workflow for bug fixes, release 
   - the app currently uses the default Electron icon unless issue `#13` is addressed
   - unsigned installers may trigger standard Windows warnings
 
+### 7.1 Sandbox and escalation notes
+
+- For this repository, assume GitHub CLI commands usually need escalation in Codex desktop because `gh` reads auth/config from the user profile, which the sandbox may not be allowed to access.
+- In practice, the following GitHub bookkeeping steps should be treated as escalation-first:
+  - viewing or editing issues, milestones, releases, or project items with `gh`
+  - creating releases, uploading release assets, or editing roadmap project fields
+- Treat `npm run build` as escalation-first for release work in Codex desktop.
+  - Verified failure mode in sandbox: Vite/esbuild can fail with `spawn EPERM` while loading `vite.config.ts`
+  - Release packaging should therefore request escalation before attempting the final production build
+- Prefer repository-local scripts such as `npm run build`, `npm run lint`, and `npm run dev` over globally installed tools.
+  - `pnpm` and `corepack` may be unavailable in the sandbox shell even when the repo uses `pnpm`
+  - Avoid depending on ad hoc global binaries during release prep unless escalation is already approved
+- If a release wrap-up depends on both a signed git push and GitHub release operations, call out the expected escalation points up front before starting the final publishing sequence.
+- Treat signed git operations as a separate preflight check during release wrap-up.
+  - Before committing, tagging, or pushing, verify that git signing works in the current environment
+  - If commit signing or tag signing fails, stop and ask the user how they want to proceed
+  - Never fall back to unsigned commits or unsigned release tags just to get the release out
+
 ### 8. Roadmap planning
 
 - Use GitHub Projects for longer-term planning and status tracking.
