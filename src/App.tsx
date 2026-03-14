@@ -24,17 +24,29 @@ const TestButton = ({ onClick, loading, label = "测试连接" }: { onClick: () 
   </button>
 );
 
+const parseScrapedAt = (value?: string) => {
+  if (!value) return null;
+
+  // SQLite CURRENT_TIMESTAMP is stored as UTC without an offset suffix.
+  const normalizedValue = /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/.test(value)
+    ? value.replace(' ', 'T') + 'Z'
+    : value;
+
+  const date = new Date(normalizedValue);
+  return Number.isNaN(date.getTime()) ? null : date;
+};
+
 const formatScrapedAt = (value?: string) => {
   if (!value) return '未知时间';
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return value;
+  const date = parseScrapedAt(value);
+  if (!date) return value;
   return date.toLocaleString();
 };
 
 const formatRelativeScrapedAt = (value?: string) => {
   if (!value) return '等待记录';
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return '时间未知';
+  const date = parseScrapedAt(value);
+  if (!date) return '时间未知';
 
   const diffMs = date.getTime() - Date.now();
   const diffMinutes = Math.round(diffMs / 60000);
