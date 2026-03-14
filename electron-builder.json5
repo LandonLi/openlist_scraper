@@ -6,6 +6,7 @@
   "productName": "OpenListScraper",
   "compression": "maximum",
   "directories": {
+    "buildResources": "build",
     "output": "release/${version}"
   },
   "publish": [
@@ -27,6 +28,7 @@
     "artifactName": "${productName}-Mac-${version}-Installer.${ext}"
   },
   "win": {
+    "icon": "build/icon.ico",
     "target": [
       {
         "target": "nsis",
@@ -41,9 +43,12 @@
     "oneClick": false,
     "perMachine": false,
     "allowToChangeInstallationDirectory": true,
-    "deleteAppDataOnUninstall": false
+    "deleteAppDataOnUninstall": false,
+    "installerIcon": "build/icon.ico",
+    "uninstallerIcon": "build/icon.ico"
   },
   "linux": {
+    "icon": "build/icon.png",
     "target": [
       "AppImage"
     ],
