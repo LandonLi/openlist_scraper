@@ -6,6 +6,7 @@
   "private": true,
   "version": "1.2.2",
   "type": "module",
+  "packageManager": "pnpm@10.17.1",
   "scripts": {
     "dev": "vite",
     "clean": "node -e \"['dist', 'dist-electron', 'release'].forEach(d => { if (require('fs').existsSync(d)) require('fs').rmSync(d, { recursive: true, force: true }) })\"",
@@ -14,7 +15,9 @@
     "preview": "vite preview"
   },
   "dependencies": {
-    "better-sqlite3": "^12.5.0"
+    "better-sqlite3": "^12.5.0",
+    "electron-log": "^5.4.3",
+    "electron-updater": "^6.8.3"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4.1.18",

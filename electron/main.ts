@@ -416,14 +416,14 @@ app.whenReady().then(() => {
   syncMetadataProvider();
 
   // Initialize Update Service
-  updateService = new UpdateService(store);
+  updateService = new UpdateService();
 
   ipcMain.handle('update:check', async () => {
     return await updateService.checkUpdate();
   });
 
-  ipcMain.handle('update:download', async (_, url) => {
-    return await updateService.downloadUpdate(url);
+  ipcMain.handle('update:download', async () => {
+    return await updateService.downloadUpdate();
   });
 
   ipcMain.handle('update:install', () => {

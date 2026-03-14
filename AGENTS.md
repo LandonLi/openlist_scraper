@@ -40,6 +40,9 @@ This repository uses a lightweight GitHub-first workflow for bug fixes, release 
 - Always create working branches with the `codex/` prefix.
 - Prefer one issue or one tightly related fix per branch.
 - Keep PRs focused. Do not mix unrelated bug fixes and release metadata changes in the same PR unless there is a strong reason.
+- All commits must be signed.
+- Never use `--no-gpg-sign` or any other bypass for commit signing.
+- If commit signing fails, stop and ask the user how they want to proceed instead of creating an unsigned commit.
 - Use PR descriptions that include:
   - a short summary
   - testing performed
@@ -82,7 +85,7 @@ This repository uses a lightweight GitHub-first workflow for bug fixes, release 
   5. build release assets
   6. upload release assets to the GitHub release
 - Current Windows packaging flow:
-  - run `npm run build`
+  - run `pnpm build`
   - output goes to `release/<version>/`
   - upload:
     - `OpenListScraper-Windows-<version>-Setup.exe`
