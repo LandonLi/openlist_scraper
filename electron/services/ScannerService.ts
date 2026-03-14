@@ -164,7 +164,8 @@ export class ScannerService {
     this.log(`正在识别上下文: ${targetPath} `);
 
     try {
-      const dirPath = path.posix.dirname(targetPath);
+      const pathApi = source.type === 'local' ? path : path.posix;
+      const dirPath = pathApi.dirname(targetPath);
       const allFiles = await source.listDir(dirPath);
 
       const extPattern = videoExtensions.split(',').map(e => e.trim()).filter(e => e).join('|');
@@ -188,7 +189,7 @@ export class ScannerService {
       const items: any[] = [];
       for (const file of videoFiles) {
         // Only process the target file
-        if (file.name !== path.basename(targetPath)) continue;
+        if (file.name !== pathApi.basename(targetPath)) continue;
 
         const match = resolveResult.matches.find(m => m.filename === file.name);
         items.push({
