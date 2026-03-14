@@ -375,6 +375,11 @@ function createWindow() {
     title: 'OpenList Scraper',
     icon: iconPath,
     frame: false,
+    width: 1440,
+    height: 920,
+    minWidth: 1180,
+    minHeight: 760,
+    center: true,
     webPreferences: {
       preload: path.join(__dirname, 'preload.mjs'),
       nodeIntegration: false,

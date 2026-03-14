@@ -1,5 +1,5 @@
-import { useEffect, useState } from 'react';
-import { useAppStore, LogType } from './stores/appStore';
+import { useEffect, useState, type ReactNode } from 'react';
+import { useAppStore, LogType, ScrapedMediaRecord } from './stores/appStore';
 import { Settings, Database, Globe, Play, Eye, EyeOff, CheckCircle2, AlertCircle, RefreshCw, Save, ArrowRight, Minus, Square, X, Folder, Network, Zap, File, Clapperboard, ChevronUp, ChevronDown, LayoutGrid, List, Wand2, Sun, Moon, ArrowLeft, CornerLeftUp, Check, Calendar, Clock, Trash2, Download, Sparkles } from 'lucide-react';
 import clsx from 'clsx';
 
@@ -23,6 +23,36 @@ const TestButton = ({ onClick, loading, label = "测试连接" }: { onClick: () 
     {label}
   </button>
 );
+
+const formatScrapedAt = (value?: string) => {
+  if (!value) return '未知时间';
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+  return date.toLocaleString();
+};
+
+const formatRelativeScrapedAt = (value?: string) => {
+  if (!value) return '等待记录';
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return '时间未知';
+
+  const diffMs = date.getTime() - Date.now();
+  const diffMinutes = Math.round(diffMs / 60000);
+  const formatter = new Intl.RelativeTimeFormat('zh-CN', { numeric: 'auto' });
+
+  if (Math.abs(diffMinutes) < 60) return formatter.format(diffMinutes, 'minute');
+
+  const diffHours = Math.round(diffMinutes / 60);
+  if (Math.abs(diffHours) < 24) return formatter.format(diffHours, 'hour');
+
+  const diffDays = Math.round(diffHours / 24);
+  return formatter.format(diffDays, 'day');
+};
+
+const basename = (input: string) => {
+  const normalized = input.replace(/\\/g, '/');
+  return normalized.split('/').filter(Boolean).pop() || input;
+};
 
 const LogItem = ({ log }: { log: { message: string, type: LogType, timestamp: number } }) => {
   const [expanded, setExpanded] = useState(false);
@@ -88,11 +118,108 @@ const LogItem = ({ log }: { log: { message: string, type: LogType, timestamp: nu
   );
 };
 
+const MediaHistoryItem = ({ item }: { item: ScrapedMediaRecord }) => {
+  const imageUrl = item.still || item.poster;
+  const episodeCode = `S${String(item.season ?? 0).padStart(2, '0')}E${String(item.episode ?? 0).padStart(2, '0')}`;
+
+  return (
+    <article className="rounded-2xl border border-slate-200 dark:border-slate-800 bg-white/90 dark:bg-slate-900/80 shadow-sm overflow-hidden">
+      <div className="flex gap-3 p-3">
+        <div className="w-24 h-16 shrink-0 rounded-xl overflow-hidden bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 flex items-center justify-center">
+          {imageUrl ? (
+            <img src={imageUrl} alt={item.episode_title || item.series_name || 'Scraped media'} className="w-full h-full object-cover" />
+          ) : (
+            <Clapperboard className="w-5 h-5 text-slate-400" />
+          )}
+        </div>
+
+        <div className="min-w-0 flex-1 space-y-1">
+          <div className="flex items-start justify-between gap-2">
+            <div className="min-w-0">
+              <p className="text-[11px] font-black uppercase tracking-[0.18em] text-blue-600 dark:text-blue-400">{episodeCode}</p>
+              <h3 className="text-sm font-bold text-slate-900 dark:text-slate-100 truncate">{item.series_name || '未命名剧集'}</h3>
+            </div>
+            <span className="shrink-0 rounded-full bg-emerald-50 dark:bg-emerald-900/20 text-emerald-600 dark:text-emerald-400 px-2 py-1 text-[10px] font-bold">
+              已刮削
+            </span>
+          </div>
+
+          <p className="text-xs font-medium text-slate-600 dark:text-slate-300 truncate">
+            {item.episode_title || '未获取剧集标题'}
+          </p>
+
+          <div className="flex flex-wrap items-center gap-2 text-[10px] font-bold uppercase tracking-wide text-slate-400">
+            <span>{formatRelativeScrapedAt(item.scraped_at)}</span>
+            {item.runtime ? <span>{item.runtime} min</span> : null}
+            {item.air_date ? <span>{item.air_date}</span> : null}
+          </div>
+        </div>
+      </div>
+
+      <button
+        type="button"
+        onClick={() => navigator.clipboard.writeText(item.file_path)}
+        className="w-full border-t border-slate-100 dark:border-slate-800 px-3 py-2 text-left transition-colors hover:bg-slate-50 dark:hover:bg-slate-800/80"
+        title="点击复制文件路径"
+      >
+        <div className="text-[10px] font-black uppercase tracking-[0.18em] text-slate-400">文件路径</div>
+        <div className="mt-1 text-xs text-slate-600 dark:text-slate-300 truncate">{basename(item.file_path)}</div>
+        <div className="mt-0.5 text-[11px] text-slate-400 truncate">{item.file_path}</div>
+      </button>
+    </article>
+  );
+};
+
+const UtilityDrawer = ({
+  title,
+  subtitle,
+  onClose,
+  widthClassName,
+  actions,
+  children,
+}: {
+  title: string;
+  subtitle: string;
+  onClose: () => void;
+  widthClassName?: string;
+  actions?: ReactNode;
+  children: ReactNode;
+}) => (
+  <>
+    <button
+      type="button"
+      aria-label="关闭侧边面板"
+      onClick={onClose}
+      className="fixed inset-0 top-8 z-[130] bg-slate-950/30 backdrop-blur-[1px]"
+    />
+    <aside className={clsx("fixed top-8 right-0 bottom-0 z-[140] max-w-[92vw] border-l border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-950 shadow-2xl flex flex-col", widthClassName ?? "w-[420px]")}>
+      <div className="px-5 py-4 border-b border-slate-200 dark:border-slate-800 flex items-start justify-between gap-4">
+        <div className="min-w-0">
+          <div className="text-[10px] font-black uppercase tracking-[0.22em] text-slate-400">{title}</div>
+          <h2 className="mt-1 text-lg font-black text-slate-900 dark:text-slate-100">{subtitle}</h2>
+        </div>
+        <div className="flex items-center gap-2 shrink-0">
+          {actions}
+          <button
+            type="button"
+            onClick={onClose}
+            className="h-9 w-9 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-500 dark:text-slate-300 flex items-center justify-center transition-colors"
+            title="关闭"
+          >
+            <X className="w-4 h-4" />
+          </button>
+        </div>
+      </div>
+      <div className="flex-1 min-h-0 overflow-y-auto">{children}</div>
+    </aside>
+  </>
+);
+
 export default function App() {
   const {
     tmdbKey, openaiKey, openaiBaseUrl, openaiModel,
     sourceType, localPath, openListUrl, openListToken,
-    logs, isScanning,
+    logs, isScanning, media,
     setConfig, setVideoExtensions, addLog, clearLogs, setScanning, setMedia
   } = useAppStore();
 
@@ -173,8 +300,8 @@ export default function App() {
   const [logLevel, setLogLevel] = useState<'info' | 'warn' | 'error'>('info');
 
   // UI State
-  const [showLogs, setShowLogs] = useState(true);
-  const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid');
+  const [activeUtilityPanel, setActiveUtilityPanel] = useState<'history' | 'logs' | null>(null);
+  const [viewMode, setViewMode] = useState<'grid' | 'list'>('list');
 
   // Update State
   const [appVersion, setAppVersion] = useState('');
@@ -183,6 +310,7 @@ export default function App() {
   const [updateInfo, setUpdateInfo] = useState<{ currentVersion: string; latestVersion: string; releaseNote: string; assetUrl?: string } | null>(null);
   const [isDownloadingUpdate, setIsDownloadingUpdate] = useState(false);
   const [downloadProgress, setDownloadProgress] = useState(0);
+  const [isRefreshingHistory, setIsRefreshingHistory] = useState(false);
 
   // Initial Configuration Loading
   useEffect(() => {
@@ -572,6 +700,16 @@ export default function App() {
     return lowerTarget === lowerRoot || lowerTarget.startsWith(`${lowerRoot}\\`) || lowerTarget.startsWith(`${lowerRoot}/`);
   };
 
+  const isValidOpenListPath = (targetPath: string) => {
+    if (!targetPath) return true;
+
+    return (
+      (targetPath === '/' || targetPath.startsWith('/')) &&
+      !targetPath.includes('\\') &&
+      !/^\/?[A-Za-z]:/.test(targetPath)
+    );
+  };
+
   const getLocalBreadcrumbParts = (targetPath: string, rootPath: string) => {
     if (!isWithinLocalRoot(targetPath, rootPath)) return [];
 
@@ -596,6 +734,17 @@ export default function App() {
     if (result.success) { setFileList(result.data); setCurrentPath(result.currentPath); }
     else { addLog(`无法加载目录: ${result.error}`, 'error'); }
     setLoadingFiles(false);
+  };
+
+  const handleSourceTypeChange = (nextType: 'local' | 'openlist') => {
+    if (nextType === sourceType) return;
+
+    setConfig('sourceType', nextType);
+    setCurrentPath('');
+    setNavHistory([]);
+    setFileList([]);
+    setSelectedPaths(new Set());
+    setLastClickedIndex(null);
   };
 
   const handleGoBack = () => {
@@ -801,7 +950,25 @@ export default function App() {
     else setSelectedIndices([...selectedIndices, idx]);
   };
 
-  const refreshMedia = async () => { const allMedia = await window.ipcRenderer.invoke('media:getAll'); setMedia(allMedia); };
+  const refreshMedia = async (options?: { silent?: boolean }) => {
+    setIsRefreshingHistory(true);
+    try {
+      const allMedia = await window.ipcRenderer.invoke('media:getAll');
+      setMedia(Array.isArray(allMedia) ? allMedia : []);
+    } catch (e: any) {
+      if (!options?.silent) {
+        addLog(`刷新历史记录失败: ${e.message}`, 'error');
+      }
+    } finally {
+      setIsRefreshingHistory(false);
+    }
+  };
+  const openUtilityPanel = async (panel: 'history' | 'logs') => {
+    setActiveUtilityPanel(panel);
+    if (panel === 'history') {
+      await refreshMedia({ silent: true });
+    }
+  };
   const isConfigured = (sourceType === 'local' && localPath) || (sourceType === 'openlist' && openListUrl);
 
   const handleCheckUpdate = async () => {
@@ -858,11 +1025,17 @@ export default function App() {
       if ((sourceType === 'local' && localPath) || (sourceType === 'openlist' && openListUrl)) {
         const nextPath = sourceType === 'local'
           ? (isWithinLocalRoot(currentPath, localPath) ? currentPath : localPath)
-          : (currentPath || '');
+          : (isValidOpenListPath(currentPath) ? currentPath : '');
         loadDirectory(nextPath);
       }
     }
   }, [activeTab, sourceType, localPath, openListUrl, isScanning]);
+
+  useEffect(() => {
+    if (activeTab !== 'dashboard' && activeUtilityPanel) {
+      setActiveUtilityPanel(null);
+    }
+  }, [activeTab, activeUtilityPanel]);
 
   return (
     <div className="flex h-screen bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-slate-100 overflow-hidden">
@@ -1042,6 +1215,37 @@ export default function App() {
               </div>
 
               <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => openUtilityPanel('history')}
+                  className={clsx(
+                    "h-9 px-3 rounded-lg text-xs font-bold flex items-center gap-2 border transition-all",
+                    activeUtilityPanel === 'history'
+                      ? "bg-blue-50 dark:bg-blue-900/20 text-blue-600 border-blue-200 dark:border-blue-800"
+                      : "bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 border-slate-200 dark:border-slate-700 hover:bg-slate-200 dark:hover:bg-slate-700"
+                  )}
+                  title="查看刮削历史"
+                >
+                  <Database className="w-4 h-4" />
+                  <span>历史</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => openUtilityPanel('logs')}
+                  className={clsx(
+                    "h-9 px-3 rounded-lg text-xs font-bold flex items-center gap-2 border transition-all",
+                    activeUtilityPanel === 'logs'
+                      ? "bg-blue-50 dark:bg-blue-900/20 text-blue-600 border-blue-200 dark:border-blue-800"
+                      : "bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 border-slate-200 dark:border-slate-700 hover:bg-slate-200 dark:hover:bg-slate-700"
+                  )}
+                  title="查看活动日志"
+                >
+                  <File className="w-4 h-4" />
+                  <span>日志</span>
+                  {isScanning && <span className="w-2 h-2 rounded-full bg-amber-400 animate-pulse" />}
+                </button>
+
                 <div className="flex bg-slate-100 dark:bg-slate-800 rounded-lg p-1 border border-slate-200 dark:border-slate-700 h-9">
                   <button onClick={() => { setViewMode('grid'); window.ipcRenderer.invoke('config:set', 'view_mode', 'grid'); }} className={clsx("p-1.5 rounded-md transition-all", viewMode === 'grid' ? "bg-white dark:bg-slate-700 text-blue-600 shadow-sm" : "text-slate-400 hover:text-slate-600 dark:hover:text-slate-200")}>
                     <LayoutGrid className="w-4 h-4" />
@@ -1080,107 +1284,186 @@ export default function App() {
               </div>
             </div>
 
-            <div className="flex-1 flex flex-col min-h-0">
-              <div className="flex-1 overflow-y-auto p-4 bg-slate-50/50 dark:bg-slate-950/50">
-                {loadingFiles ? (
-                  <div className="flex flex-col items-center justify-center h-full text-slate-400 gap-3">
-                    <RefreshCw className="w-8 h-8 animate-spin opacity-50" />
-                    <span className="text-xs font-medium uppercase tracking-widest">正在加载目录...</span>
-                  </div>
-                ) : (
-                  <div className={clsx(
-                    viewMode === 'grid'
-                      ? "grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-3"
-                      : "flex flex-col gap-1"
-                  )}>
-                    {fileList.length === 0 && isConfigured && !loadingFiles && (
-                      <div className={clsx("col-span-full flex flex-col items-center justify-center text-slate-400 gap-3", viewMode === 'grid' ? "py-20" : "py-10")}>
-                        <div className="w-16 h-16 bg-slate-100 dark:bg-slate-800 rounded-full flex items-center justify-center mb-2">
-                          <Folder className="w-8 h-8 opacity-50" />
-                        </div>
-                        <span className="font-bold text-sm">空目录</span>
-                        <span className="text-xs opacity-70">此位置没有文件</span>
-                      </div>
-                    )}
-
-                    {fileList.map((file, i) => (
-                      <div key={i}
-                        onClick={(e) => { if (file.isDir) handleNavigate(file.path); else toggleSelection(file.path, i, { ctrlKey: e.ctrlKey, shiftKey: e.shiftKey }); }}
-                        className={clsx(
-                          "group relative rounded-xl border transition-all duration-200 cursor-pointer select-none",
-                          viewMode === 'grid' ? "p-4 flex flex-col justify-between" : "px-4 py-2.5 flex items-center gap-3",
-                          selectedPaths.has(file.path)
-                            ? "bg-blue-50 dark:bg-blue-900/20 border-blue-500/50 shadow-sm ring-1 ring-blue-500/20"
-                            : "bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-800 hover:border-blue-300 dark:hover:border-blue-700 hover:shadow-md"
-                        )}
-                      >
-                        <div className={clsx("flex items-center gap-2.5 min-w-0", viewMode === 'grid' ? "mb-2" : "flex-1")}>
-                          {!file.isDir && (
-                            <div
-                              className={clsx(
-                                "w-4 h-4 rounded border flex shrink-0 items-center justify-center transition-all",
-                                selectedPaths.has(file.path)
-                                  ? "bg-blue-500 border-blue-500"
-                                  : "border-slate-300 dark:border-slate-600 hover:border-blue-400 bg-white dark:bg-slate-800"
-                              )}
-                              onClick={(e) => { e.stopPropagation(); toggleSelection(file.path, i, { ctrlKey: e.ctrlKey, shiftKey: e.shiftKey }); }}
-                            >
-                              {selectedPaths.has(file.path) && <Check className="w-3 h-3 text-white" />}
-                            </div>
-                          )}
-                          {file.isDir && <div className="w-4 h-4 shrink-0" />} {/* Spacer for dirs without checkbox */}
-                          <div className={clsx("truncate text-sm", file.isDir ? "text-blue-600 dark:text-blue-400 font-bold" : "text-slate-700 dark:text-slate-200 font-medium")}>
-                            {file.isDir ? `[目录] ${file.name}` : file.name}
-                          </div>
-                        </div>
-
-                        {viewMode === 'list' && (
-                          <div className="text-[10px] text-slate-400 w-24 text-right font-mono uppercase tracking-tighter">
-                            {file.isDir ? 'FOLDER' : (file.size ? (file.size / 1024 / 1024).toFixed(2) + ' MB' : '0 KB')}
-                          </div>
-                        )}
-                        {viewMode === 'grid' && (
-                          <div className="text-[10px] text-slate-400 text-right mt-1 font-mono uppercase tracking-tighter">
-                            {file.isDir ? 'FOLDER' : (file.size ? (file.size / 1024 / 1024).toFixed(2) + ' MB' : '0 KB')}
-                          </div>
-                        )}
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
-
-              <div className={clsx("flex flex-col border-t border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 shrink-0 transition-all duration-300", showLogs ? "h-48" : "h-9")}>
-                <div
-                  className="px-4 py-2 border-b border-slate-100 dark:border-slate-800 flex justify-between items-center bg-slate-50/50 dark:bg-slate-900/50 cursor-pointer hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
-                  onClick={() => setShowLogs(!showLogs)}
-                >
-                  <div className="text-[10px] font-bold text-slate-500 uppercase tracking-widest flex items-center gap-2">
-                    <div className={clsx("w-2 h-2 rounded-full transition-colors", isScanning ? 'bg-amber-400 animate-pulse' : 'bg-slate-300')}>
+            <div className="flex-1 min-h-0 overflow-y-auto p-4 bg-slate-50/50 dark:bg-slate-950/50">
+              {!isConfigured ? (
+                <div className="h-full min-h-[420px] flex items-center justify-center">
+                  <div className="max-w-md text-center px-6">
+                    <div className="mx-auto w-16 h-16 rounded-2xl bg-slate-100 dark:bg-slate-800 flex items-center justify-center border border-slate-200 dark:border-slate-700">
+                      <Folder className="w-7 h-7 text-slate-400" />
                     </div>
-                    活动日志
-                  </div>
-                  <div className="flex items-center gap-2">
+                    <h2 className="mt-5 text-xl font-black text-slate-900 dark:text-slate-100">准备开始浏览媒体库</h2>
+                    <p className="mt-3 text-sm leading-7 text-slate-500 dark:text-slate-400">
+                      主视图会像文件资源管理器一样展示目录和媒体文件。先配置一个数据源，然后从左上路径栏进入你的媒体库。
+                    </p>
                     <button
-                      onClick={(e) => { e.stopPropagation(); clearLogs(); }}
-                      className="p-1 hover:bg-slate-200 dark:hover:bg-slate-700 rounded text-slate-400 hover:text-red-500 transition-colors"
-                      title="清空日志"
+                      onClick={() => { setActiveTab('settings'); setSettingsTab('library'); }}
+                      className="mt-6 h-10 px-5 bg-blue-600 hover:bg-blue-500 text-white rounded-xl text-sm font-bold inline-flex items-center gap-2 shadow-lg shadow-blue-500/20 transition-all"
                     >
-                      <Trash2 className="w-3.5 h-3.5" />
-                    </button>
-                    <button className="text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 p-1">
-                      {showLogs ? <ChevronDown className="w-4 h-4" /> : <ChevronUp className="w-4 h-4" />}
+                      配置数据源
+                      <ArrowRight className="w-4 h-4" />
                     </button>
                   </div>
                 </div>
-                <div className="flex-1 overflow-y-auto p-4 font-mono text-[11px] space-y-2">
-                  {logs.length === 0 && <div className="text-slate-400 italic opacity-50 flex items-center gap-2"><div className="w-1 h-1 bg-slate-400 rounded-full"></div> 系统就绪，等待任务...</div>}
-                  {logs.map((log, i) => <LogItem key={i} log={log} />)}
-                  <div id="log-end" />
+              ) : loadingFiles ? (
+                <div className="flex flex-col items-center justify-center h-full text-slate-400 gap-3">
+                  <RefreshCw className="w-8 h-8 animate-spin opacity-50" />
+                  <span className="text-xs font-medium uppercase tracking-widest">正在加载目录...</span>
+                </div>
+              ) : (
+                <div className={clsx(
+                  viewMode === 'grid'
+                    ? "grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 2xl:grid-cols-5 gap-3"
+                    : "flex flex-col gap-1"
+                )}>
+                  {fileList.length === 0 && (
+                    <div className={clsx("col-span-full flex flex-col items-center justify-center text-slate-400 gap-3", viewMode === 'grid' ? "py-20" : "py-10")}>
+                      <div className="w-16 h-16 bg-slate-100 dark:bg-slate-800 rounded-full flex items-center justify-center mb-2">
+                        <Folder className="w-8 h-8 opacity-50" />
+                      </div>
+                      <span className="font-bold text-sm">空目录</span>
+                      <span className="text-xs opacity-70">此位置没有文件</span>
+                    </div>
+                  )}
+
+                  {fileList.map((file, i) => (
+                    <div key={i}
+                      onClick={(e) => { if (file.isDir) handleNavigate(file.path); else toggleSelection(file.path, i, { ctrlKey: e.ctrlKey, shiftKey: e.shiftKey }); }}
+                      className={clsx(
+                        "group relative rounded-xl border transition-all duration-200 cursor-pointer select-none",
+                        viewMode === 'grid' ? "p-4 flex flex-col justify-between" : "px-4 py-2.5 flex items-center gap-3",
+                        selectedPaths.has(file.path)
+                          ? "bg-blue-50 dark:bg-blue-900/20 border-blue-500/50 shadow-sm ring-1 ring-blue-500/20"
+                          : "bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-800 hover:border-blue-300 dark:hover:border-blue-700 hover:shadow-md"
+                      )}
+                    >
+                      <div className={clsx("flex items-center gap-2.5 min-w-0", viewMode === 'grid' ? "mb-2" : "flex-1")}>
+                        {!file.isDir && (
+                          <div
+                            className={clsx(
+                              "w-4 h-4 rounded border flex shrink-0 items-center justify-center transition-all",
+                              selectedPaths.has(file.path)
+                                ? "bg-blue-500 border-blue-500"
+                                : "border-slate-300 dark:border-slate-600 hover:border-blue-400 bg-white dark:bg-slate-800"
+                            )}
+                            onClick={(e) => { e.stopPropagation(); toggleSelection(file.path, i, { ctrlKey: e.ctrlKey, shiftKey: e.shiftKey }); }}
+                          >
+                            {selectedPaths.has(file.path) && <Check className="w-3 h-3 text-white" />}
+                          </div>
+                        )}
+                        {file.isDir && <div className="w-4 h-4 shrink-0" />}
+                        <div className={clsx("truncate text-sm", file.isDir ? "text-blue-600 dark:text-blue-400 font-bold" : "text-slate-700 dark:text-slate-200 font-medium")}>
+                          {file.isDir ? `[目录] ${file.name}` : file.name}
+                        </div>
+                      </div>
+
+                      {viewMode === 'list' && (
+                        <div className="text-[10px] text-slate-400 w-24 text-right font-mono uppercase tracking-tighter">
+                          {file.isDir ? 'FOLDER' : (file.size ? (file.size / 1024 / 1024).toFixed(2) + ' MB' : '0 KB')}
+                        </div>
+                      )}
+                      {viewMode === 'grid' && (
+                        <div className="text-[10px] text-slate-400 text-right mt-1 font-mono uppercase tracking-tighter">
+                          {file.isDir ? 'FOLDER' : (file.size ? (file.size / 1024 / 1024).toFixed(2) + ' MB' : '0 KB')}
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+
+        {activeTab === 'dashboard' && activeUtilityPanel === 'history' && (
+          <UtilityDrawer
+            title="Scrape History"
+            subtitle="刮削历史"
+            onClose={() => setActiveUtilityPanel(null)}
+            actions={(
+              <button
+                type="button"
+                onClick={() => refreshMedia()}
+                disabled={isRefreshingHistory}
+                className="h-9 px-3 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 hover:bg-slate-100 dark:hover:bg-slate-800 text-xs font-bold text-slate-600 dark:text-slate-300 flex items-center gap-2 transition-colors disabled:opacity-50"
+                title="刷新历史记录"
+              >
+                <RefreshCw className={clsx("w-3.5 h-3.5", isRefreshingHistory && "animate-spin")} />
+                刷新
+              </button>
+            )}
+          >
+            <div className="p-5 border-b border-slate-200 dark:border-slate-800 grid grid-cols-2 gap-3">
+              <div className="rounded-2xl bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 px-4 py-3">
+                <div className="text-[10px] font-black uppercase tracking-[0.18em] text-slate-400">总记录</div>
+                <div className="mt-2 text-2xl font-black text-slate-900 dark:text-slate-100">{media.length}</div>
+              </div>
+              <div className="rounded-2xl bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 px-4 py-3">
+                <div className="text-[10px] font-black uppercase tracking-[0.18em] text-slate-400">最近一次</div>
+                <div className="mt-2 text-sm font-bold text-slate-900 dark:text-slate-100">
+                  {media[0] ? formatRelativeScrapedAt(media[0].scraped_at) : '暂无'}
+                </div>
+                <div className="mt-1 text-[11px] text-slate-400 truncate">
+                  {media[0] ? formatScrapedAt(media[0].scraped_at) : '等待首条记录'}
                 </div>
               </div>
             </div>
-          </div>
+
+            <div className="p-4 space-y-3">
+              {media.length === 0 ? (
+                <div className="min-h-[280px] rounded-[28px] border border-dashed border-slate-300 dark:border-slate-700 bg-slate-50/70 dark:bg-slate-900/60 flex flex-col items-center justify-center text-center px-6">
+                  <div className="w-14 h-14 rounded-full bg-slate-100 dark:bg-slate-800 flex items-center justify-center">
+                    <Database className="w-6 h-6 text-slate-400" />
+                  </div>
+                  <h3 className="mt-4 text-sm font-bold text-slate-700 dark:text-slate-200">还没有历史记录</h3>
+                  <p className="mt-2 text-xs leading-6 text-slate-500 dark:text-slate-400">
+                    完成一次批量刮削后，这里会按时间倒序展示剧集标题、季集号、时间和文件路径。
+                  </p>
+                </div>
+              ) : (
+                media.map((item, index) => (
+                  <MediaHistoryItem key={item.id ?? `${item.file_path}-${index}`} item={item} />
+                ))
+              )}
+            </div>
+          </UtilityDrawer>
+        )}
+
+        {activeTab === 'dashboard' && activeUtilityPanel === 'logs' && (
+          <UtilityDrawer
+            title="Activity Log"
+            subtitle="活动日志"
+            onClose={() => setActiveUtilityPanel(null)}
+            widthClassName="w-[460px]"
+            actions={(
+              <button
+                type="button"
+                onClick={clearLogs}
+                className="h-9 px-3 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 hover:bg-slate-100 dark:hover:bg-slate-800 text-xs font-bold text-slate-600 dark:text-slate-300 flex items-center gap-2 transition-colors"
+                title="清空日志"
+              >
+                <Trash2 className="w-3.5 h-3.5" />
+                清空
+              </button>
+            )}
+          >
+            <div className="px-5 py-4 border-b border-slate-200 dark:border-slate-800 flex items-center justify-between gap-3">
+              <div className="flex items-center gap-2 text-xs font-bold text-slate-500 dark:text-slate-400">
+                <span className={clsx("w-2 h-2 rounded-full", isScanning ? "bg-amber-400 animate-pulse" : "bg-emerald-400")} />
+                {isScanning ? '扫描进行中' : '当前空闲'}
+              </div>
+              <div className="text-[11px] text-slate-400">{logs.length} 条记录</div>
+            </div>
+
+            <div className="p-4 font-mono text-[11px] space-y-2">
+              {logs.length === 0 ? (
+                <div className="min-h-[240px] rounded-[24px] border border-dashed border-slate-300 dark:border-slate-700 bg-slate-50/70 dark:bg-slate-900/60 flex items-center justify-center text-slate-400 italic">
+                  系统就绪，等待任务...
+                </div>
+              ) : (
+                logs.map((log, i) => <LogItem key={i} log={log} />)
+              )}
+            </div>
+          </UtilityDrawer>
         )}
 
         {activeTab === 'settings' && (
@@ -1307,7 +1590,7 @@ export default function App() {
                 <section className="space-y-6">
                   <div className="flex gap-4">
                     {['local', 'openlist'].map(type => (
-                      <button key={type} onClick={() => setConfig('sourceType', type as any)} className={clsx("flex-1 p-4 rounded-xl border-2 text-left transition-all", sourceType === type ? "border-blue-600 bg-blue-50/50 dark:bg-blue-900/10" : "border-slate-200 dark:border-slate-800")}>
+                      <button key={type} onClick={() => handleSourceTypeChange(type as 'local' | 'openlist')} className={clsx("flex-1 p-4 rounded-xl border-2 text-left transition-all", sourceType === type ? "border-blue-600 bg-blue-50/50 dark:bg-blue-900/10" : "border-slate-200 dark:border-slate-800")}>
                         <div className="font-bold capitalize">{type}</div>
                         <div className="text-[10px] text-slate-400 mt-1">{type === 'local' ? '扫描本地文件夹' : '同步 OpenList 服务器'}</div>
                       </button>

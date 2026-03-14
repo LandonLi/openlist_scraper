@@ -2,6 +2,23 @@ import { create } from 'zustand';
 
 export type LogType = 'info' | 'success' | 'error' | 'warn' | 'debug';
 
+export interface ScrapedMediaRecord {
+  id?: number;
+  file_path: string;
+  source_id: string;
+  series_name?: string;
+  season?: number;
+  episode?: number;
+  tmdb_id?: string;
+  episode_title?: string;
+  overview?: string;
+  poster?: string;
+  still?: string;
+  air_date?: string;
+  runtime?: number;
+  scraped_at: string;
+}
+
 interface AppState {
   // Config
   tmdbKey: string;
@@ -24,7 +41,7 @@ interface AppState {
   // Media
 
   // Media
-  media: any[];
+  media: ScrapedMediaRecord[];
 
   // Actions
   setConfig: (key: string, value: string) => void;
@@ -32,7 +49,7 @@ interface AppState {
   addLog: (message: string, type: LogType) => void;
   clearLogs: () => void;
   setScanning: (status: boolean) => void;
-  setMedia: (media: any[]) => void;
+  setMedia: (media: ScrapedMediaRecord[]) => void;
 }
 
 export const useAppStore = create<AppState>((set) => ({
