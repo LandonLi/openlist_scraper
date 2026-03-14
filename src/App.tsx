@@ -552,6 +552,27 @@ export default function App() {
     loadDirectory(path);
   };
 
+  const isWithinLocalRoot = (targetPath: string, rootPath: string) => {
+    if (!targetPath || !rootPath) return false;
+
+    const normalizedRoot = rootPath.replace(/[\\/]+$/, '');
+    const normalizedTarget = targetPath.replace(/[\\/]+$/, '');
+    const lowerRoot = normalizedRoot.toLowerCase();
+    const lowerTarget = normalizedTarget.toLowerCase();
+
+    return lowerTarget === lowerRoot || lowerTarget.startsWith(`${lowerRoot}\\`) || lowerTarget.startsWith(`${lowerRoot}/`);
+  };
+
+  const getLocalBreadcrumbParts = (targetPath: string, rootPath: string) => {
+    if (!isWithinLocalRoot(targetPath, rootPath)) return [];
+
+    const normalizedRoot = rootPath.replace(/[\\/]+$/, '');
+    const normalizedTarget = targetPath.replace(/[\\/]+$/, '');
+    const relativePath = normalizedTarget.slice(normalizedRoot.length).replace(/^[/\\]+/, '');
+
+    return relativePath ? relativePath.split(/[\\/]/).filter(Boolean) : [];
+  };
+
   const loadDirectory = async (path: string, options?: { isBack?: boolean }) => {
     setLoadingFiles(true);
     setFileList([]);
@@ -589,12 +610,26 @@ export default function App() {
     if (selectedPaths.size > 0) {
       const paths = Array.from(selectedPaths);
       addLog(`正在为 ${paths.length} 个选定项目开始匹配...`, 'info');
-      const res = await window.ipcRenderer.invoke('scanner:scan-selected', { type: sourceType, id: `src_${Date.now()}`, paths, url: openListUrl, token: openListToken });
+      const res = await window.ipcRenderer.invoke('scanner:scan-selected', {
+        type: sourceType,
+        id: `src_${Date.now()}`,
+        paths,
+        path: sourceType === 'local' ? localPath : currentPath,
+        url: openListUrl,
+        token: openListToken
+      });
       if (!res.success) { addLog(res.error, 'error'); setScanning(false); }
     } else {
       if (!currentPath) return;
       addLog(`开始递归扫描目录: ${currentPath}`, 'info');
-      const res = await window.ipcRenderer.invoke('scanner:start', { type: sourceType, id: `src_${Date.now()}`, path: currentPath, url: openListUrl, token: openListToken });
+      const res = await window.ipcRenderer.invoke('scanner:start', {
+        type: sourceType,
+        id: `src_${Date.now()}`,
+        path: currentPath,
+        rootPath: sourceType === 'local' ? localPath : undefined,
+        url: openListUrl,
+        token: openListToken
+      });
       if (!res.success) { addLog(res.error, 'error'); setScanning(false); }
     }
   };
@@ -812,7 +847,10 @@ export default function App() {
   useEffect(() => {
     if (activeTab === 'dashboard' && !isScanning) {
       if ((sourceType === 'local' && localPath) || (sourceType === 'openlist' && openListUrl)) {
-        loadDirectory(currentPath || (sourceType === 'local' ? localPath : ''));
+        const nextPath = sourceType === 'local'
+          ? (isWithinLocalRoot(currentPath, localPath) ? currentPath : localPath)
+          : (currentPath || '');
+        loadDirectory(nextPath);
       }
     }
   }, [activeTab, sourceType, localPath, openListUrl, isScanning]);
@@ -957,19 +995,24 @@ export default function App() {
                     </button>
                   )}
                   {currentPath && currentPath !== '/' && currentPath !== localPath ? (
-                    currentPath.replace(localPath, '').split(/[\\/]/).filter(Boolean).map((part, index, arr) => {
+                    (sourceType === 'local' ? getLocalBreadcrumbParts(currentPath, localPath) : currentPath.split(/[\\/]/).filter(Boolean)).map((part, index, arr) => {
                       const isLast = index === arr.length - 1;
                       return (
                         <div key={index} className="flex items-center text-xs">
                           <span className="text-slate-300 dark:text-slate-600 mx-0.5">/</span>
                           <button
                             onClick={() => {
-                              const sep = currentPath.includes('\\') ? '\\' : '/';
-                              let parts = currentPath.split(sep).filter(Boolean);
-                              const partIndex = parts.lastIndexOf(part);
-                              let newPath = parts.slice(0, partIndex + 1).join(sep);
-                              if (sep === '\\' && newPath.length === 2 && newPath.endsWith(':')) newPath += '\\';
-                              if (sep === '/' && !newPath.startsWith('/')) newPath = '/' + newPath;
+                              const newPath = sourceType === 'local'
+                                ? [localPath, ...arr.slice(0, index + 1)].join('\\')
+                                : (() => {
+                                    const sep = currentPath.includes('\\') ? '\\' : '/';
+                                    const parts = currentPath.split(sep).filter(Boolean);
+                                    const partIndex = parts.lastIndexOf(part);
+                                    let computedPath = parts.slice(0, partIndex + 1).join(sep);
+                                    if (sep === '\\' && computedPath.length === 2 && computedPath.endsWith(':')) computedPath += '\\';
+                                    if (sep === '/' && !computedPath.startsWith('/')) computedPath = '/' + computedPath;
+                                    return computedPath;
+                                  })();
                               handleNavigate(newPath);
                             }}
                             className={clsx(
