@@ -242,11 +242,17 @@ export default function App() {
       refreshMedia();
     };
     const handleConfirmation = (data: any) => {
+      setMetadataFetched(false);
+      setFetchingMetadata(false);
+      setMetadataProgress({ current: 0, total: 0 });
       setWizardData({ detectedName: data.detectedName, seriesResults: data.results });
       setManualSeriesName(data.detectedName); // Initialize with detected name
       setWizardWizardStage('series');
     };
     const handleEpisodesConfirmation = (data: any) => {
+      setMetadataFetched(false);
+      setFetchingMetadata(false);
+      setMetadataProgress({ current: 0, total: 0 });
       setWizardData(prev => ({
         ...prev,
         seriesName: data.seriesName,
@@ -361,6 +367,9 @@ export default function App() {
     setWizardWizardStage('idle');
     setWizardData({});
     setScrapeProgress({ percent: 0, message: '' });
+    setMetadataFetched(false);
+    setFetchingMetadata(false);
+    setMetadataProgress({ current: 0, total: 0 });
 
     if (wizardStage === 'finished') {
       setScanning(false);

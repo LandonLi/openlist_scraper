@@ -37,6 +37,25 @@ let llmClient: OpenAIClient;
 let llmEngine: LLMEngine;
 let regexEngine: RegexEngine;
 
+function buildMetadataProvider() {
+  const currentTmdbKey = store.get('tmdb_api_key') as string || '';
+  const currentProxyUrl = store.get('proxy_url') as string || '';
+  const provider = MetadataFactory.create('tmdb', { apiKey: currentTmdbKey });
+
+  if ('setProxy' in provider) (provider as any).setProxy(currentProxyUrl);
+
+  return provider;
+}
+
+function syncMetadataProvider() {
+  metadataProvider = buildMetadataProvider();
+
+  if (scannerService) {
+    scannerService.setMetadataProvider(metadataProvider);
+    scannerService.setProxy(store.get('proxy_url') as string || '');
+  }
+}
+
 function registerIpcHandlers() {
   ipcMain.handle('config:get', (_, key) => store.get(key));
   ipcMain.handle('config:set', async (_, key, value) => {
@@ -47,6 +66,9 @@ function registerIpcHandlers() {
     }
     if (key === 'log_level' && scannerService) {
       scannerService.setLogLevel(value as any);
+    }
+    if ((key === 'tmdb_api_key' || key === 'proxy_url') && scannerService) {
+      syncMetadataProvider();
     }
   });
 
@@ -145,18 +167,13 @@ function registerIpcHandlers() {
       const connected = await source.connect(connectConfig);
       if (!connected) return { success: false, error: '连接失败' };
 
-      const currentTmdbKey = store.get('tmdb_api_key') as string || '';
       const currentOpenaiKey = store.get('openai_api_key') as string || '';
       const currentOpenaiBase = store.get('openai_base_url') as string || '';
       const currentOpenaiModel = store.get('openai_model') as string || '';
       const currentProxyUrl = store.get('proxy_url') as string || '';
 
       llmClient.configure({ apiKey: currentOpenaiKey, baseURL: currentOpenaiBase, model: currentOpenaiModel, proxyUrl: currentProxyUrl });
-      const newMetadataProvider = MetadataFactory.create('tmdb', { apiKey: currentTmdbKey });
-      if ('setProxy' in newMetadataProvider) (newMetadataProvider as any).setProxy(currentProxyUrl);
-
-      scannerService.setMetadataProvider(newMetadataProvider);
-      scannerService.setProxy(currentProxyUrl);
+      syncMetadataProvider();
 
       // 设置 OpenList 批次大小
       const batchSize = store.get('openlist_batch_size') as string || '20';
@@ -177,14 +194,13 @@ function registerIpcHandlers() {
       const connected = await source.connect(connectConfig);
       if (!connected) return { success: false, error: '连接失败' };
 
-      const currentTmdbKey = store.get('tmdb_api_key') as string || '';
       const currentOpenaiKey = store.get('openai_api_key') as string || '';
       const currentOpenaiBase = store.get('openai_base_url') as string || '';
       const currentOpenaiModel = store.get('openai_model') as string || '';
+      const currentProxyUrl = store.get('proxy_url') as string || '';
 
-      llmClient.configure({ apiKey: currentOpenaiKey, baseURL: currentOpenaiBase, model: currentOpenaiModel });
-      const newMetadataProvider = MetadataFactory.create('tmdb', { apiKey: currentTmdbKey });
-      scannerService.setMetadataProvider(newMetadataProvider);
+      llmClient.configure({ apiKey: currentOpenaiKey, baseURL: currentOpenaiBase, model: currentOpenaiModel, proxyUrl: currentProxyUrl });
+      syncMetadataProvider();
 
       // 设置 OpenList 批次大小
       const batchSize = store.get('openlist_batch_size') as string || '20';
@@ -205,14 +221,13 @@ function registerIpcHandlers() {
       const connected = await source.connect(connectConfig);
       if (!connected) return { success: false, error: '连接失败' };
 
-      const currentTmdbKey = store.get('tmdb_api_key') as string || '';
       const currentOpenaiKey = store.get('openai_api_key') as string || '';
       const currentOpenaiBase = store.get('openai_base_url') as string || '';
       const currentOpenaiModel = store.get('openai_model') as string || '';
+      const currentProxyUrl = store.get('proxy_url') as string || '';
 
-      llmClient.configure({ apiKey: currentOpenaiKey, baseURL: currentOpenaiBase, model: currentOpenaiModel });
-      const newMetadataProvider = MetadataFactory.create('tmdb', { apiKey: currentTmdbKey });
-      scannerService.setMetadataProvider(newMetadataProvider);
+      llmClient.configure({ apiKey: currentOpenaiKey, baseURL: currentOpenaiBase, model: currentOpenaiModel, proxyUrl: currentProxyUrl });
+      syncMetadataProvider();
 
       // 设置 OpenList 批次大小
       const batchSize = store.get('openlist_batch_size') as string || '20';
@@ -386,17 +401,14 @@ app.whenReady().then(() => {
   llmClient = new OpenAIClient();
   llmEngine = new LLMEngine(llmClient);
 
-  const tmdbKeyInitial = store.get('tmdb_api_key') as string || '';
-  metadataProvider = MetadataFactory.create('tmdb', { apiKey: tmdbKeyInitial });
+  metadataProvider = buildMetadataProvider();
 
   scannerService = new ScannerService(regexEngine, llmEngine, metadataProvider, dbService);
 
   const savedLogLevel = store.get('log_level') as string || 'info';
   scannerService.setLogLevel(savedLogLevel as any);
 
-  const savedProxyUrl = store.get('proxy_url') as string || '';
-  scannerService.setProxy(savedProxyUrl);
-  if (metadataProvider.setProxy) (metadataProvider as any).setProxy(savedProxyUrl);
+  syncMetadataProvider();
 
   // Initialize Update Service
   updateService = new UpdateService(store);
