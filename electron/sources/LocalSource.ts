@@ -6,7 +6,7 @@ import { IMediaSource, FileItem } from '../interfaces/IMediaSource';
 export class LocalSource implements IMediaSource {
   id: string;
   name: string;
-  type: 'local' = 'local';
+  type = 'local' as const;
   private rootPath: string = '';
 
   constructor(id: string, name: string) {
@@ -35,11 +35,7 @@ export class LocalSource implements IMediaSource {
   async listDir(dirPath: string): Promise<FileItem[]> {
     if (!this.rootPath) throw new Error('Source not connected');
 
-    // Ensure we don't escape rootPath
-    const fullPath = path.resolve(this.rootPath, dirPath.replace(/^\/+/g, ''));
-    if (!fullPath.startsWith(path.resolve(this.rootPath))) {
-      throw new Error('Access denied: Path outside root');
-    }
+    const fullPath = this.resolveWithinRoot(dirPath);
 
     const items = await fs.readdir(fullPath, { withFileTypes: true });
 
@@ -66,25 +62,29 @@ export class LocalSource implements IMediaSource {
   }
 
   async getFileStream(path: string): Promise<Readable> {
-    return fs.createReadStream(path);
+    return fs.createReadStream(this.resolveWithinRoot(path));
   }
 
   async rename(oldPath: string, newPath: string): Promise<boolean> {
     try {
-      await fs.rename(oldPath, newPath);
+      await fs.rename(this.resolveWithinRoot(oldPath), this.resolveWithinRoot(newPath));
       return true;
     } catch (e) {
       return false;
     }
   }
 
-  async batchRename(srcDir: string, renameObjects: Array<{ src_name: string, new_name: string }>, _batchSize?: number, _onProgress?: (current: number, total: number) => void): Promise<boolean> {
+  async batchRename(srcDir: string, renameObjects: Array<{ src_name: string, new_name: string }>, _batchSize?: number, onProgress?: (current: number, total: number) => void): Promise<boolean> {
     try {
+      const resolvedDir = this.resolveWithinRoot(srcDir);
+      let processed = 0;
       for (const obj of renameObjects) {
         await fs.rename(
-          path.join(srcDir, obj.src_name),
-          path.join(srcDir, obj.new_name)
+          path.join(resolvedDir, obj.src_name),
+          path.join(resolvedDir, obj.new_name)
         );
+        processed++;
+        onProgress?.(processed, renameObjects.length);
       }
       return true;
     } catch (e) {
@@ -94,10 +94,25 @@ export class LocalSource implements IMediaSource {
 
   async writeFile(path: string, content: Buffer | string): Promise<boolean> {
     try {
-      await fs.outputFile(path, content);
+      await fs.outputFile(this.resolveWithinRoot(path), content);
       return true;
     } catch (e) {
       return false;
     }
+  }
+
+  private resolveWithinRoot(targetPath: string): string {
+    if (!this.rootPath) throw new Error('Source not connected');
+
+    const normalizedRoot = path.resolve(this.rootPath);
+    const candidatePath = targetPath.replace(/^[/\\]+/g, '');
+    const resolvedPath = path.resolve(normalizedRoot, candidatePath);
+    const rootWithSep = normalizedRoot.endsWith(path.sep) ? normalizedRoot : `${normalizedRoot}${path.sep}`;
+
+    if (resolvedPath !== normalizedRoot && !resolvedPath.startsWith(rootWithSep)) {
+      throw new Error('Access denied: Path outside root');
+    }
+
+    return resolvedPath;
   }
 }

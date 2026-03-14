@@ -97,7 +97,16 @@ function registerIpcHandlers() {
         const fullPath = targetPath || config.localPath;
         if (!fullPath || !await fs.pathExists(fullPath)) return { success: false, error: '路径不存在' };
         const items = await fs.readdir(fullPath, { withFileTypes: true });
-        const data = items.map(item => ({ name: item.name, path: path.join(fullPath, item.name), isDir: item.isDirectory(), size: 0 }));
+        const data = await Promise.all(items.map(async (item) => {
+          const itemPath = path.join(fullPath, item.name);
+          const stats = item.isFile() ? await fs.stat(itemPath) : null;
+          return {
+            name: item.name,
+            path: itemPath,
+            isDir: item.isDirectory(),
+            size: stats?.size || 0
+          };
+        }));
         data.sort((a, b) => (a.isDir === b.isDir ? a.name.localeCompare(b.name) : a.isDir ? -1 : 1));
         return { success: true, data, currentPath: fullPath };
       }
@@ -130,7 +139,10 @@ function registerIpcHandlers() {
   ipcMain.handle('scanner:start', async (_, sourceConfig) => {
     try {
       const source = SourceFactory.create(sourceConfig.type, sourceConfig.id, 'Source');
-      const connected = await source.connect(sourceConfig);
+      const connectConfig = sourceConfig.type === 'local'
+        ? { path: sourceConfig.rootPath || sourceConfig.path }
+        : sourceConfig;
+      const connected = await source.connect(connectConfig);
       if (!connected) return { success: false, error: '连接失败' };
 
       const currentTmdbKey = store.get('tmdb_api_key') as string || '';
@@ -159,7 +171,10 @@ function registerIpcHandlers() {
   ipcMain.handle('scanner:scan-selected', async (_, sourceConfig) => {
     try {
       const source = SourceFactory.create(sourceConfig.type, sourceConfig.id, 'Source');
-      const connected = await source.connect(sourceConfig);
+      const connectConfig = sourceConfig.type === 'local'
+        ? { path: sourceConfig.path }
+        : sourceConfig;
+      const connected = await source.connect(connectConfig);
       if (!connected) return { success: false, error: '连接失败' };
 
       const currentTmdbKey = store.get('tmdb_api_key') as string || '';
@@ -184,7 +199,10 @@ function registerIpcHandlers() {
   ipcMain.handle('scanner:identify-single', async (_, sourceConfig) => {
     try {
       const source = SourceFactory.create(sourceConfig.type, sourceConfig.id, 'Source');
-      const connected = await source.connect(sourceConfig);
+      const connectConfig = sourceConfig.type === 'local'
+        ? { path: sourceConfig.rootPath || sourceConfig.path }
+        : sourceConfig;
+      const connected = await source.connect(connectConfig);
       if (!connected) return { success: false, error: '连接失败' };
 
       const currentTmdbKey = store.get('tmdb_api_key') as string || '';

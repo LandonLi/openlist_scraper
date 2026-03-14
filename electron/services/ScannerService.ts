@@ -420,12 +420,13 @@ export class ScannerService {
     try {
       const fileItems: any[] = [];
       const pathsByDir = new Map<string, Set<string>>();
+      const pathApi = source.type === 'local' ? path : path.posix;
 
       // Group by directory to minimize listDir calls
       for (const p of selectedPaths) {
-        const dir = path.posix.dirname(p);
+        const dir = pathApi.dirname(p);
         if (!pathsByDir.has(dir)) pathsByDir.set(dir, new Set());
-        pathsByDir.get(dir)?.add(path.posix.basename(p));
+        pathsByDir.get(dir)?.add(pathApi.basename(p));
       }
 
       for (const [dir, files] of pathsByDir) {
