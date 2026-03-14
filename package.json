@@ -8,8 +8,11 @@
   "type": "module",
   "packageManager": "pnpm@10.17.1",
   "scripts": {
+    "postinstall": "electron-builder install-app-deps",
     "predev": "powershell -NoProfile -ExecutionPolicy Bypass -File ./scripts/generate-icons.ps1",
+    "prebuild": "electron-builder install-app-deps",
     "dev": "vite",
+    "rebuild:native": "electron-builder install-app-deps",
     "clean": "node -e \"['dist', 'dist-electron', 'release'].forEach(d => { if (require('fs').existsSync(d)) require('fs').rmSync(d, { recursive: true, force: true }) })\"",
     "generate:icons": "powershell -NoProfile -ExecutionPolicy Bypass -File ./scripts/generate-icons.ps1",
     "build": "node -e \"['dist', 'dist-electron', 'release'].forEach(d => { if (require('fs').existsSync(d)) require('fs').rmSync(d, { recursive: true, force: true }) })\" && powershell -NoProfile -ExecutionPolicy Bypass -File ./scripts/generate-icons.ps1 && tsc && vite build && electron-builder",

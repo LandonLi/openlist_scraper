@@ -1,7 +1,67 @@
-import Database from 'better-sqlite3';
 import path from 'path';
 import fs from 'fs-extra';
 import { app } from 'electron';
+import { createRequire } from 'module';
+
+type BetterSqliteDatabase = import('better-sqlite3').Database;
+type BetterSqliteConstructor = new (
+  filename: string,
+  options?: Record<string, unknown>,
+) => BetterSqliteDatabase;
+
+const require = createRequire(import.meta.url);
+const BETTER_SQLITE_NATIVE_ERROR_PATTERNS = [
+  /Could not locate the bindings file/i,
+  /was compiled against a different Node\.js version/i,
+  /NODE_MODULE_VERSION/i,
+];
+
+export class NativeDependencyError extends Error {
+  constructor(message: string, options?: { cause?: unknown }) {
+    super(message);
+    this.name = 'NativeDependencyError';
+
+    if (options && 'cause' in options) {
+      (this as Error & { cause?: unknown }).cause = options.cause;
+    }
+  }
+}
+
+function normalizeBetterSqliteError(error: unknown): Error {
+  if (error instanceof NativeDependencyError) {
+    return error;
+  }
+
+  const originalMessage = error instanceof Error ? error.message : String(error);
+  const isNativeDependencyFailure = BETTER_SQLITE_NATIVE_ERROR_PATTERNS.some((pattern) =>
+    pattern.test(originalMessage),
+  );
+
+  if (!isNativeDependencyFailure) {
+    return error instanceof Error ? error : new Error(originalMessage);
+  }
+
+  const recoveryMessage = [
+    'better-sqlite3 的 Electron 原生依赖未就绪，应用无法初始化本地缓存数据库。',
+    '请在仓库根目录执行 `pnpm run rebuild:native`（或 `npm run rebuild:native`），完成后重新启动开发环境。',
+    '',
+    `原始错误：${originalMessage}`,
+  ].join('\n');
+
+  return new NativeDependencyError(recoveryMessage, { cause: error });
+}
+
+function loadBetterSqlite(): BetterSqliteConstructor {
+  try {
+    const loaded = require('better-sqlite3') as
+      | BetterSqliteConstructor
+      | { default: BetterSqliteConstructor };
+
+    return typeof loaded === 'function' ? loaded : loaded.default;
+  } catch (error) {
+    throw normalizeBetterSqliteError(error);
+  }
+}
 
 export interface ScrapedMedia {
   id?: number;
@@ -21,14 +81,22 @@ export interface ScrapedMedia {
 }
 
 export class DatabaseService {
-  private db: Database.Database;
+  private db: BetterSqliteDatabase;
 
   constructor() {
     // In production, store DB in userData directory
     const dbPath = path.join(app.getPath('userData'), 'media_scraper.db');
     fs.ensureDirSync(path.dirname(dbPath));
-    
-    this.db = new Database(dbPath);
+
+    // Delay native module loading so we can surface an actionable recovery step.
+    const Database = loadBetterSqlite();
+
+    try {
+      this.db = new Database(dbPath);
+    } catch (error) {
+      throw normalizeBetterSqliteError(error);
+    }
+
     this.initSchema();
   }
 

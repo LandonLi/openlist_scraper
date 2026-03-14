@@ -46,12 +46,23 @@
     ```bash
     pnpm install
     ```
+    安装完成后会自动执行 Electron 原生依赖重建，确保 `better-sqlite3` 对齐当前 Electron 版本。
 
 3.  **启动开发模式**
     同时启动 Vite 开发服务器和 Electron 主进程。
     ```bash
     pnpm dev
     ```
+
+### Windows 本地开发恢复
+
+如果在 Windows 上运行 `pnpm dev` 时看到 `Could not locate the bindings file` 或其他 `better-sqlite3` native binding 错误，请在仓库根目录执行：
+
+```bash
+pnpm run rebuild:native
+```
+
+也可以使用 `npm run rebuild:native`。重建完成后重新启动开发环境即可。
 
 ### 打包发布
 

@@ -6,7 +6,7 @@ import fs from 'fs-extra';
 
 // Core Services
 import { ScannerService } from './services/ScannerService';
-import { DatabaseService } from './services/DatabaseService';
+import { DatabaseService, NativeDependencyError } from './services/DatabaseService';
 
 // Core Logic
 import { RegexEngine } from './matchers/RegexEngine';
@@ -395,51 +395,70 @@ function createWindow() {
   else win.loadFile(path.join(process.env.DIST || '', 'index.html'));
 }
 
+function handleStartupError(error: unknown) {
+  console.error('[Startup] Failed to initialize application', error);
+
+  const message = error instanceof NativeDependencyError
+    ? error.message
+    : error instanceof Error
+      ? error.message
+      : String(error);
+
+  dialog.showErrorBox('OpenList Scraper 启动失败', message);
+  app.quit();
+}
+
 // Update Service
 import { UpdateService } from './services/UpdateService';
 let updateService: UpdateService;
 
 app.whenReady().then(() => {
-  // 2. Initialize store AFTER app name is set
-  store = new ElectronStore({ name: 'settings' });
+  try {
+    // 2. Initialize store AFTER app name is set
+    store = new ElectronStore({ name: 'settings' });
 
-  // 3. Initialize all services
-  dbService = new DatabaseService();
-  regexEngine = new RegexEngine(path.join(process.env.DIST_ELECTRON || '', 'resources/default_rules.json'));
-  llmClient = new OpenAIClient();
-  llmEngine = new LLMEngine(llmClient);
+    // 3. Initialize all services
+    dbService = new DatabaseService();
+    regexEngine = new RegexEngine(path.join(process.env.DIST_ELECTRON || '', 'resources/default_rules.json'));
+    llmClient = new OpenAIClient();
+    llmEngine = new LLMEngine(llmClient);
 
-  metadataProvider = buildMetadataProvider();
+    metadataProvider = buildMetadataProvider();
 
-  scannerService = new ScannerService(regexEngine, llmEngine, metadataProvider, dbService);
+    scannerService = new ScannerService(regexEngine, llmEngine, metadataProvider, dbService);
 
-  const savedLogLevel = store.get('log_level') as string || 'info';
-  scannerService.setLogLevel(savedLogLevel as any);
+    const savedLogLevel = store.get('log_level') as string || 'info';
+    scannerService.setLogLevel(savedLogLevel as any);
 
-  syncMetadataProvider();
+    syncMetadataProvider();
 
-  // Initialize Update Service
-  updateService = new UpdateService();
+    // Initialize Update Service
+    updateService = new UpdateService();
 
-  ipcMain.handle('update:check', async () => {
-    return await updateService.checkUpdate();
-  });
+    ipcMain.handle('update:check', async () => {
+      return await updateService.checkUpdate();
+    });
 
-  ipcMain.handle('update:download', async () => {
-    return await updateService.downloadUpdate();
-  });
+    ipcMain.handle('update:download', async () => {
+      return await updateService.downloadUpdate();
+    });
 
-  ipcMain.handle('update:install', () => {
-    updateService.installUpdate();
-  });
+    ipcMain.handle('update:install', () => {
+      updateService.installUpdate();
+    });
 
-  if (process.platform === 'win32') {
-    app.setAppUserModelId('com.openlist.scraper');
+    if (process.platform === 'win32') {
+      app.setAppUserModelId('com.openlist.scraper');
+    }
+
+    registerIpcHandlers();
+    createWindow();
+
+    // Set window for update service
+    if (win) updateService.setMainWindow(win);
+  } catch (error) {
+    handleStartupError(error);
   }
-
-  registerIpcHandlers();
-  createWindow();
-
-  // Set window for update service
-  if (win) updateService.setMainWindow(win);
+}).catch((error) => {
+  handleStartupError(error);
 });
