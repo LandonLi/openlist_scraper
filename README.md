@@ -18,6 +18,7 @@
 *   **现代化 UI**：基于 React + Tailwind CSS 构建的精美界面，支持 **深色模式 (Dark Mode)** 切换，提供网格与列表两种视图。
 *   **灵活配置**：支持自定义正则匹配规则，可配置 OpenAI 兼容接口（如 LocalAI, Ollama）以降低识别成本。
 *   **详细的日志系统**：内置活动日志面板，支持点击复制、折叠长日志（如 JSON 数据）、关键字高亮与多级日志过滤（Debug/Info/Error），方便排查元数据匹配问题。
+*   **应用内更新**：安装版会在启动后静默检查 GitHub Releases，也支持点击标题栏版本号手动检查、下载并重启安装新版本。
 
 ## 🛠️ 技术栈
 
@@ -41,17 +42,15 @@
     ```
 
 2.  **安装依赖**
-    推荐使用 `npm` 或 `pnpm`。
+    本仓库统一使用 `pnpm`。
     ```bash
-    npm install
-    # 或者
     pnpm install
     ```
 
 3.  **启动开发模式**
     同时启动 Vite 开发服务器和 Electron 主进程。
     ```bash
-    npm run dev
+    pnpm dev
     ```
 
 ### 打包发布
@@ -59,9 +58,23 @@
 构建生产环境的安装包（支持 Windows/macOS/Linux）：
 
 ```bash
-npm run build
+pnpm build
 ```
-打包后的文件将位于 `dist` 目录中。
+打包后的文件将位于 `release/<version>/` 目录中。
+
+### 自动更新发布要求
+
+应用内更新依赖 `electron-updater` 和 GitHub Releases。发布新版本时请确保：
+
+1.  GitHub Release 的 Tag 与 `package.json` 版本一致，例如 `v1.3.0`。
+2.  上传 `release/<version>/` 中的以下文件：
+    *   `OpenListScraper-Windows-<version>-Setup.exe`
+    *   `OpenListScraper-Windows-<version>-Setup.exe.blockmap`
+    *   `latest.yml`
+3.  Release 保持为已发布状态，避免仅停留在 Draft。
+4.  安装版应用启动后会自动检查更新；开发模式下不会启用自动更新。
+
+`latest.yml` 和 `.blockmap` 由 `electron-builder` 在打包时生成，Windows NSIS 安装包会优先使用这些元数据执行差分下载。
 
 ## ⚙️ 配置指南
 

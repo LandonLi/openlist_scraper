@@ -1,146 +1,167 @@
 import { app, BrowserWindow } from 'electron';
-import path from 'path';
-import fs from 'fs-extra';
-import fetch from 'node-fetch';
-import { spawn } from 'child_process';
-import { HttpsProxyAgent } from 'https-proxy-agent';
-import ElectronStore from 'electron-store';
+import log from 'electron-log';
+import { autoUpdater, type ProgressInfo, type UpdateInfo } from 'electron-updater';
+
+type ReleaseNoteEntry = {
+  note: string | null;
+  version: string;
+};
+
+export interface CheckUpdateResult {
+  hasUpdate: boolean;
+  currentVersion: string;
+  latestVersion: string;
+  releaseNote?: string;
+  error?: string;
+}
 
 export class UpdateService {
-    private store: ElectronStore;
-    private mainWindow: BrowserWindow | null = null;
-    private tempPath: string;
+  private mainWindow: BrowserWindow | null = null;
 
-    constructor(store: ElectronStore) {
-        this.store = store;
-        this.tempPath = path.join(app.getPath('temp'), 'OpenListScraper-Update');
+  constructor() {
+    autoUpdater.autoDownload = false;
+    autoUpdater.autoInstallOnAppQuit = false;
+    autoUpdater.allowPrerelease = false;
+    autoUpdater.logger = log;
+
+    autoUpdater.on('download-progress', (progress) => {
+      this.mainWindow?.webContents.send('update:download-progress', this.serializeProgress(progress));
+    });
+
+    autoUpdater.on('update-downloaded', (info) => {
+      this.mainWindow?.webContents.send('update:downloaded', {
+        version: info.version,
+        releaseNote: this.normalizeReleaseNotes(info.releaseNotes),
+      });
+    });
+
+    autoUpdater.on('error', (error) => {
+      this.mainWindow?.webContents.send('update:error', {
+        message: error?.message || 'Unknown auto-update error',
+      });
+    });
+  }
+
+  setMainWindow(win: BrowserWindow) {
+    this.mainWindow = win;
+  }
+
+  async checkUpdate(): Promise<CheckUpdateResult> {
+    const currentVersion = app.getVersion();
+
+    if (!app.isPackaged) {
+      return {
+        hasUpdate: false,
+        currentVersion,
+        latestVersion: currentVersion,
+        error: '自动更新仅在打包后的安装版本中可用。',
+      };
     }
 
-    setMainWindow(win: BrowserWindow) {
-        this.mainWindow = win;
+    try {
+      const result = await autoUpdater.checkForUpdates();
+      const info = result?.updateInfo;
+
+      if (info && this.compareVersions(info.version, currentVersion) > 0) {
+        return this.buildAvailableResult(currentVersion, info);
+      }
+
+      return {
+        hasUpdate: false,
+        currentVersion,
+        latestVersion: currentVersion,
+      };
+    } catch (error: any) {
+      log.error('Check update failed', error);
+      return {
+        hasUpdate: false,
+        currentVersion,
+        latestVersion: currentVersion,
+        error: error?.message || '检查更新失败',
+      };
+    }
+  }
+
+  async downloadUpdate(): Promise<{ success: boolean; error?: string }> {
+    if (!app.isPackaged) {
+      return {
+        success: false,
+        error: '自动更新仅在打包后的安装版本中可用。',
+      };
     }
 
-    async checkUpdate(): Promise<{ hasUpdate: boolean; currentVersion: string; latestVersion: string; releaseNote?: string; assetUrl?: string; error?: string }> {
-        try {
-            const currentVersion = app.getVersion();
-            const proxyUrl = this.store.get('proxy_url') as string;
+    try {
+      await autoUpdater.downloadUpdate();
+      return { success: true };
+    } catch (error: any) {
+      log.error('Download update failed', error);
+      return {
+        success: false,
+        error: error?.message || '下载更新失败',
+      };
+    }
+  }
 
-            const options: any = {
-                headers: { 'User-Agent': 'OpenListScraper' }
-            };
-
-            if (proxyUrl) {
-                options.agent = new HttpsProxyAgent(proxyUrl);
-            }
-
-            // Latest release API
-            const response = await fetch('https://api.github.com/repos/LandonLi/openlist_scraper/releases/latest', options);
-
-            if (!response.ok) {
-                throw new Error(`GitHub API Error: ${response.status} ${response.statusText}`);
-            }
-
-            const data: any = await response.json();
-            const tagName = data.tag_name;
-            const cleanTag = tagName.replace(/^v/, '');
-
-            // Simple semver compare
-            if (this.compareVersions(cleanTag, currentVersion) > 0) {
-                // Find exe asset
-                const asset = data.assets.find((a: any) => a.name.endsWith('.exe'));
-                return {
-                    hasUpdate: true,
-                    currentVersion,
-                    latestVersion: cleanTag,
-                    releaseNote: data.body,
-                    assetUrl: asset ? asset.browser_download_url : undefined
-                };
-            }
-
-            return { hasUpdate: false, currentVersion, latestVersion: currentVersion };
-
-        } catch (e: any) {
-            console.error('Check update failed:', e);
-            return { hasUpdate: false, currentVersion: app.getVersion(), latestVersion: '', error: e.message };
-        }
+  installUpdate() {
+    if (!app.isPackaged) {
+      return false;
     }
 
-    async downloadUpdate(url: string): Promise<boolean> {
-        try {
-            await fs.ensureDir(this.tempPath);
-            const filePath = path.join(this.tempPath, 'setup.exe');
+    autoUpdater.quitAndInstall(false, true);
+    return true;
+  }
 
-            // Clean up previous
-            if (await fs.pathExists(filePath)) {
-                await fs.remove(filePath);
-            }
+  private buildAvailableResult(currentVersion: string, info: UpdateInfo): CheckUpdateResult {
+    return {
+      hasUpdate: true,
+      currentVersion,
+      latestVersion: info.version,
+      releaseNote: this.normalizeReleaseNotes(info.releaseNotes),
+    };
+  }
 
-            const proxyUrl = this.store.get('proxy_url') as string;
-            const options: any = {
-                headers: { 'User-Agent': 'OpenListScraper' }
-            };
+  private serializeProgress(progress: ProgressInfo) {
+    return {
+      bytesPerSecond: progress.bytesPerSecond,
+      delta: progress.delta,
+      percent: Number(progress.percent.toFixed(1)),
+      total: progress.total,
+      transferred: progress.transferred,
+    };
+  }
 
-            if (proxyUrl) {
-                options.agent = new HttpsProxyAgent(proxyUrl);
-            }
-
-            const response = await fetch(url, options);
-            if (!response.ok) throw new Error(`Download failed: ${response.statusText}`);
-
-            const totalSize = Number(response.headers.get('content-length') || 0);
-            const fileStream = fs.createWriteStream(filePath);
-            let downloaded = 0;
-
-            return new Promise<boolean>((resolve, reject) => {
-                response.body!.pipe(fileStream);
-
-                response.body!.on('data', (chunk: Buffer) => {
-                    downloaded += chunk.length;
-                    if (this.mainWindow && totalSize > 0) {
-                        const percent = (downloaded / totalSize) * 100;
-                        this.mainWindow.webContents.send('update:download-progress', { percent: percent.toFixed(1) });
-                    }
-                });
-
-                fileStream.on('finish', () => {
-                    resolve(true);
-                });
-
-                fileStream.on('error', (err) => {
-                    reject(err);
-                });
-            });
-
-        } catch (e) {
-            console.error('Download update failed', e);
-            return false;
-        }
+  private normalizeReleaseNotes(
+    releaseNotes?: string | Array<ReleaseNoteEntry> | null,
+  ): string {
+    if (!releaseNotes) {
+      return '暂无发布说明';
     }
 
-    installUpdate() {
-        const filePath = path.join(this.tempPath, 'setup.exe');
-        if (fs.existsSync(filePath)) {
-            // Spawn detached process
-            spawn(filePath, ['/silent'], {
-                detached: true,
-                stdio: 'ignore'
-            }).unref();
-
-            app.quit();
-        }
+    if (typeof releaseNotes === 'string') {
+      return releaseNotes.trim() || '暂无发布说明';
     }
 
-    // Helper: returns 1 if v1 > v2, -1 if v1 < v2, 0 if equal
-    private compareVersions(v1: string, v2: string): number {
-        const parts1 = v1.split('.').map(Number);
-        const parts2 = v2.split('.').map(Number);
+    const notes = releaseNotes
+      .map((item) => {
+        const header = item.version ? `v${item.version}` : '新版本';
+        return `${header}\n${item.note || '暂无发布说明'}`.trim();
+      })
+      .filter(Boolean);
 
-        for (let i = 0; i < Math.max(parts1.length, parts2.length); i++) {
-            const p1 = parts1[i] || 0;
-            const p2 = parts2[i] || 0;
-            if (p1 > p2) return 1;
-            if (p1 < p2) return -1;
-        }
-        return 0;
+    return notes.join('\n\n').trim() || '暂无发布说明';
+  }
+
+  private compareVersions(v1: string, v2: string): number {
+    const parts1 = v1.split('.').map(Number);
+    const parts2 = v2.split('.').map(Number);
+
+    for (let i = 0; i < Math.max(parts1.length, parts2.length); i += 1) {
+      const p1 = parts1[i] || 0;
+      const p2 = parts2[i] || 0;
+      if (p1 > p2) return 1;
+      if (p1 < p2) return -1;
     }
+
+    return 0;
+  }
 }

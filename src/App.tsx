@@ -3,6 +3,12 @@ import { useAppStore, LogType, ScrapedMediaRecord } from './stores/appStore';
 import { Settings, Database, Globe, Play, Eye, EyeOff, CheckCircle2, AlertCircle, RefreshCw, Save, ArrowRight, Minus, Square, X, Folder, Network, Zap, File, Clapperboard, ChevronUp, ChevronDown, LayoutGrid, List, Wand2, Sun, Moon, ArrowLeft, CornerLeftUp, Check, Calendar, Clock, Trash2, Download, Sparkles } from 'lucide-react';
 import clsx from 'clsx';
 
+type UpdateInfoState = {
+  currentVersion: string;
+  latestVersion: string;
+  releaseNote: string;
+};
+
 const StatusMessage = ({ result }: { result: { success: boolean; message: string } | null }) => {
   if (!result) return null;
   return (
@@ -319,9 +325,10 @@ export default function App() {
   const [appVersion, setAppVersion] = useState('');
   const [isCheckingUpdate, setIsCheckingUpdate] = useState(false);
   const [showUpdateDialog, setShowUpdateDialog] = useState(false);
-  const [updateInfo, setUpdateInfo] = useState<{ currentVersion: string; latestVersion: string; releaseNote: string; assetUrl?: string } | null>(null);
+  const [updateInfo, setUpdateInfo] = useState<UpdateInfoState | null>(null);
   const [isDownloadingUpdate, setIsDownloadingUpdate] = useState(false);
   const [downloadProgress, setDownloadProgress] = useState(0);
+  const [isUpdateReady, setIsUpdateReady] = useState(false);
   const [isRefreshingHistory, setIsRefreshingHistory] = useState(false);
 
   // Initial Configuration Loading
@@ -411,12 +418,36 @@ export default function App() {
       setDownloadProgress(Number(data.percent));
     };
 
+    const handleUpdateDownloaded = (data: any) => {
+      setIsDownloadingUpdate(false);
+      setIsUpdateReady(true);
+      setDownloadProgress(100);
+      setShowUpdateDialog(true);
+      setUpdateInfo((prev) => {
+        if (prev) {
+          return {
+            ...prev,
+            latestVersion: data?.version || prev.latestVersion,
+            releaseNote: data?.releaseNote || prev.releaseNote,
+          };
+        }
+
+        return {
+          currentVersion: '',
+          latestVersion: data?.version || '',
+          releaseNote: data?.releaseNote || '暂无发布说明',
+        };
+      });
+      addLog('更新下载完成，准备在重启后安装。', 'success');
+    };
+
     const cleanupLog = window.ipcRenderer.on('scanner-log', handleLog);
     const cleanupFinished = window.ipcRenderer.on('scanner-finished', handleFinished);
     const cleanupConf = window.ipcRenderer.on('scanner-require-confirmation', handleConfirmation);
     const cleanupEpConf = window.ipcRenderer.on('scanner-require-episodes-confirmation', handleEpisodesConfirmation);
     const cleanupProgress = window.ipcRenderer.on('scanner-operation-progress', handleProgress);
     const cleanupDlProgress = window.ipcRenderer.on('update:download-progress', handleDownloadProgress);
+    const cleanupDownloaded = window.ipcRenderer.on('update:downloaded', handleUpdateDownloaded);
 
     loadConfig();
     return () => {
@@ -426,6 +457,7 @@ export default function App() {
       if (typeof cleanupEpConf === 'function') (cleanupEpConf as any)();
       if (typeof cleanupProgress === 'function') (cleanupProgress as any)();
       if (typeof cleanupDlProgress === 'function') (cleanupDlProgress as any)();
+      if (typeof cleanupDownloaded === 'function') (cleanupDownloaded as any)();
     };
   }, []);
 
@@ -983,54 +1015,84 @@ export default function App() {
   };
   const isConfigured = (sourceType === 'local' && localPath) || (sourceType === 'openlist' && openListUrl);
 
-  const handleCheckUpdate = async () => {
+  const runUpdateCheck = async (options?: { silent?: boolean }) => {
     if (isCheckingUpdate) return;
+
+    const silent = options?.silent ?? false;
     setIsCheckingUpdate(true);
-    addLog('正在检查更新...', 'info');
+    if (!silent) {
+      addLog('正在检查更新...', 'info');
+    }
+
     try {
       const result = await window.ipcRenderer.invoke('update:check');
       if (result.hasUpdate) {
+        setIsUpdateReady(false);
+        setDownloadProgress(0);
         setUpdateInfo({
           currentVersion: result.currentVersion,
           latestVersion: result.latestVersion,
           releaseNote: result.releaseNote || '暂无发布说明',
-          assetUrl: result.assetUrl
         });
         setShowUpdateDialog(true);
         addLog(`发现新版本: v${result.latestVersion}`, 'success');
       } else {
-        if (result.error) {
+        if (!silent && result.error) {
           addLog(`检查更新失败: ${result.error}`, 'error');
-        } else {
+        } else if (!silent) {
           addLog('当前已是最新版本', 'success');
         }
       }
     } catch (e: any) {
-      addLog(`检查更新出错: ${e.message}`, 'error');
+      if (!silent) {
+        addLog(`检查更新出错: ${e.message}`, 'error');
+      }
     } finally {
       setIsCheckingUpdate(false);
     }
   };
 
+  const handleCheckUpdate = async () => {
+    await runUpdateCheck();
+  };
+
   const handleDownloadUpdate = async () => {
-    if (!updateInfo?.assetUrl) return;
+    if (isUpdateReady) {
+      addLog('正在退出并安装更新...', 'info');
+      await window.ipcRenderer.invoke('update:install');
+      return;
+    }
+
+    if (!updateInfo || isDownloadingUpdate) return;
+
     setIsDownloadingUpdate(true);
     setDownloadProgress(0);
     addLog('开始下载更新...', 'info');
+
     try {
-      const success = await window.ipcRenderer.invoke('update:download', updateInfo.assetUrl);
-      if (success) {
-        addLog('下载完成，正在重启安装...', 'success');
-        window.ipcRenderer.invoke('update:install');
+      const result = await window.ipcRenderer.invoke('update:download');
+      if (result?.success) {
+        setIsUpdateReady(true);
+        setDownloadProgress(100);
       } else {
-        addLog('下载更新失败', 'error');
-        setIsDownloadingUpdate(false);
+        addLog(`下载更新失败: ${result?.error || '未知错误'}`, 'error');
       }
     } catch (e: any) {
       addLog(`更新失败: ${e.message}`, 'error');
+    } finally {
       setIsDownloadingUpdate(false);
     }
   };
+
+  useEffect(() => {
+    if (!appVersion) return;
+
+    const timer = window.setTimeout(() => {
+      runUpdateCheck({ silent: true });
+    }, 2500);
+
+    return () => window.clearTimeout(timer);
+  }, [appVersion]);
 
   useEffect(() => {
     if (activeTab === 'dashboard' && !isScanning) {
@@ -1112,6 +1174,12 @@ export default function App() {
               </pre>
             </div>
 
+            {isUpdateReady && (
+              <div className="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs font-medium text-emerald-700 dark:border-emerald-900/60 dark:bg-emerald-950/40 dark:text-emerald-300">
+                更新包已下载完成，点击下方按钮后应用将退出并安装新版本。
+              </div>
+            )}
+
             <div className="flex justify-end gap-2 pt-2">
               <button
                 onClick={() => setShowUpdateDialog(false)}
@@ -1122,13 +1190,18 @@ export default function App() {
               </button>
               <button
                 onClick={handleDownloadUpdate}
-                disabled={isDownloadingUpdate || !updateInfo.assetUrl}
+                disabled={isDownloadingUpdate}
                 className="px-4 py-2 rounded-lg text-xs font-bold bg-blue-600 hover:bg-blue-500 disabled:opacity-50 disabled:cursor-not-allowed text-white shadow-lg shadow-blue-500/20 transition-all flex items-center gap-2"
               >
                 {isDownloadingUpdate ? (
                   <>
                     <RefreshCw className="w-3.5 h-3.5 animate-spin" />
                     Downloading {downloadProgress}%
+                  </>
+                ) : isUpdateReady ? (
+                  <>
+                    <Check className="w-3.5 h-3.5" />
+                    重启并安装
                   </>
                 ) : (
                   <>

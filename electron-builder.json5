@@ -8,6 +8,14 @@
   "directories": {
     "output": "release/${version}"
   },
+  "publish": [
+    {
+      "provider": "github",
+      "owner": "LandonLi",
+      "repo": "openlist_scraper",
+      "releaseType": "release"
+    }
+  ],
   "files": [
     "dist",
     "dist-electron"
