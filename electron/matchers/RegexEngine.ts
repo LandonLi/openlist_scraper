@@ -10,9 +10,10 @@ interface RegexRule {
 
 export class RegexEngine implements IMatcher {
   private rules: RegexRule[] = [];
+  private readonly loadPromise: Promise<void>;
 
   constructor(defaultRulesPath: string, customRulesPath?: string) {
-    this.loadRules(defaultRulesPath, customRulesPath);
+    this.loadPromise = this.loadRules(defaultRulesPath, customRulesPath);
   }
 
   private async loadRules(defaultRulesPath: string, customRulesPath?: string) {
@@ -32,6 +33,8 @@ export class RegexEngine implements IMatcher {
   }
 
   async match(filename: string): Promise<MatchResult> {
+    await this.loadPromise;
+
     const cleanName = path.basename(filename, path.extname(filename));
 
     for (const rule of this.rules) {
