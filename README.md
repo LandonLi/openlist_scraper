@@ -62,6 +62,8 @@ pnpm build
 ```
 打包后的文件将位于 `release/<version>/` 目录中。
 
+发布前的安装器回归检查请参考 [docs/installer-qa-checklist.md](docs/installer-qa-checklist.md)。
+
 ### 自动更新发布要求
 
 应用内更新依赖 `electron-updater` 和 GitHub Releases。发布新版本时请确保：
@@ -75,6 +77,8 @@ pnpm build
 4.  安装版应用启动后会自动检查更新；开发模式下不会启用自动更新。
 
 `latest.yml` 和 `.blockmap` 由 `electron-builder` 在打包时生成，Windows NSIS 安装包会优先使用这些元数据执行差分下载。
+
+项目会在打包前自动从 `public/app-icon.png` 生成 `build/icon.ico` 和 `build/icon.png`，用于 Windows 安装包和应用图标资源。
 
 ## ⚙️ 配置指南
 

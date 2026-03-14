@@ -179,3 +179,5 @@ vite.config.ts.timestamp-*
 # Electron Build Output
 dist-electron/
 release/
+build/icon.ico
+build/icon.png

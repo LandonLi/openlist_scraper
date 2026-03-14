@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain, dialog } from 'electron';
+import { app, BrowserWindow, ipcMain, dialog, nativeImage } from 'electron';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import ElectronStore from 'electron-store';
@@ -367,13 +367,16 @@ function registerIpcHandlers() {
 }
 
 function createWindow() {
-  const iconPng = path.join(process.env.PUBLIC || '', 'app-icon.png');
-  const iconSvg = path.join(process.env.PUBLIC || '', 'app-icon.svg');
-  const iconPath = fs.existsSync(iconPng) ? iconPng : iconSvg;
+  const appRoot = path.join(process.env.DIST_ELECTRON || '', '..');
+  const iconIco = path.join(appRoot, 'build', 'icon.ico');
+  const iconPng = path.join(appRoot, 'public', 'app-icon.png');
+  const iconPath = process.platform === 'win32' && fs.existsSync(iconIco)
+    ? iconIco
+    : iconPng;
 
   win = new BrowserWindow({
     title: 'OpenList Scraper',
-    icon: iconPath,
+    icon: nativeImage.createFromPath(iconPath),
     frame: false,
     width: 1440,
     height: 920,

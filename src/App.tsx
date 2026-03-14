@@ -1116,7 +1116,12 @@ export default function App() {
       {/* Title Bar */}
       <div className="fixed top-0 left-0 right-0 h-8 z-[100] flex items-center justify-between bg-white dark:bg-slate-900 border-b border-slate-200 dark:border-slate-800 select-none" style={{ WebkitAppRegion: 'drag' } as any}>
         <div className="px-3 flex items-center gap-2 text-[11px] font-bold text-slate-500 tracking-wider uppercase">
-          <Clapperboard className="w-3.5 h-3.5 text-blue-500" />
+          <img
+            src="./app-icon.png"
+            alt="OpenList Scraper"
+            className="w-4 h-4 rounded-[4px] object-cover shadow-sm"
+            draggable={false}
+          />
           <span>OpenList 媒体整理</span>
           <button
             onClick={handleCheckUpdate}
