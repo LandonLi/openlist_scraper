@@ -12,6 +12,7 @@ export class ScannerService {
   private regexEngine: RegexEngine;
   private llmEngine: LLMEngine;
   private metadataProvider: IMetadataProvider;
+  private dbService: DatabaseService;
   private mainWindow: BrowserWindow | null = null;
   private _isScanning: boolean = false;
 
@@ -24,11 +25,12 @@ export class ScannerService {
     regexEngine: RegexEngine,
     llmEngine: LLMEngine,
     metadataProvider: IMetadataProvider,
-    _db: DatabaseService
+    dbService: DatabaseService
   ) {
     this.regexEngine = regexEngine;
     this.llmEngine = llmEngine;
     this.metadataProvider = metadataProvider;
+    this.dbService = dbService;
   }
 
   public get isScanning(): boolean {
@@ -408,6 +410,26 @@ export class ScannerService {
         currentStep++;
       }
     }
+
+    for (const item of itemsToProcess) {
+      if (!item.metadata) continue;
+
+      this.dbService.saveMedia({
+        filePath: item.file.path,
+        sourceId: source.id,
+        seriesName,
+        season: item.match.season ?? 1,
+        episode: item.match.episode ?? 1,
+        tmdbId: item.tmdbId,
+        episodeTitle: item.metadata.title,
+        overview: item.metadata.overview,
+        poster: seriesInfo.poster,
+        still: item.metadata.stillPath,
+        airDate: item.metadata.airDate,
+        runtime: item.metadata.runtime,
+      });
+    }
+
     this.mainWindow?.webContents.send('scanner-operation-progress', { percent: 100, message: '完成！', finished: true });
     this.log(`操作已完成: ${seriesName}`, 'success');
   }
