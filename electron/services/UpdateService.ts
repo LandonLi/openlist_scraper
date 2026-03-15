@@ -17,6 +17,14 @@ export interface CheckUpdateResult {
 
 export class UpdateService {
   private mainWindow: BrowserWindow | null = null;
+  private readonly htmlEntityMap: Record<string, string> = {
+    amp: '&',
+    lt: '<',
+    gt: '>',
+    quot: '"',
+    apos: '\'',
+    nbsp: ' ',
+  };
 
   constructor() {
     autoUpdater.autoDownload = false;
@@ -138,17 +146,56 @@ export class UpdateService {
     }
 
     if (typeof releaseNotes === 'string') {
-      return releaseNotes.trim() || '暂无发布说明';
+      return this.formatReleaseNoteText(releaseNotes);
     }
 
     const notes = releaseNotes
       .map((item) => {
         const header = item.version ? `v${item.version}` : '新版本';
-        return `${header}\n${item.note || '暂无发布说明'}`.trim();
+        return `${header}\n${this.formatReleaseNoteText(item.note)}`.trim();
       })
       .filter(Boolean);
 
     return notes.join('\n\n').trim() || '暂无发布说明';
+  }
+
+  private formatReleaseNoteText(rawText?: string | null): string {
+    if (!rawText) {
+      return '暂无发布说明';
+    }
+
+    const text = this.decodeHtmlEntities(
+      rawText
+        .replace(/\r\n/g, '\n')
+        .replace(/<br\s*\/?>/gi, '\n')
+        .replace(/<\/?(p|div|section|article|header|footer|h[1-6]|blockquote|pre|table|tr)\b[^>]*>/gi, '\n')
+        .replace(/<li\b[^>]*>/gi, '\n- ')
+        .replace(/<\/li>/gi, '')
+        .replace(/<\/?(ul|ol)\b[^>]*>/gi, '\n')
+        .replace(/<[^>]+>/g, ''),
+    )
+      .split('\n')
+      .map((line) => line.replace(/[ \t]+/g, ' ').trim())
+      .filter((line, index, lines) => line || lines[index - 1])
+      .join('\n')
+      .replace(/\n{3,}/g, '\n\n')
+      .trim();
+
+    return text || '暂无发布说明';
+  }
+
+  private decodeHtmlEntities(input: string): string {
+    return input.replace(/&(#x?[0-9a-f]+|[a-z]+);/gi, (_, entity: string) => {
+      if (entity.startsWith('#x') || entity.startsWith('#X')) {
+        return String.fromCodePoint(Number.parseInt(entity.slice(2), 16));
+      }
+
+      if (entity.startsWith('#')) {
+        return String.fromCodePoint(Number.parseInt(entity.slice(1), 10));
+      }
+
+      return this.htmlEntityMap[entity.toLowerCase()] ?? `&${entity};`;
+    });
   }
 
   private compareVersions(v1: string, v2: string): number {
