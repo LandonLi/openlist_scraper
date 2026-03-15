@@ -66,14 +66,40 @@ pnpm run rebuild:native
 
 ### 打包发布
 
-构建生产环境的安装包（支持 Windows/macOS/Linux）：
+构建生产环境安装包：
 
 ```bash
 pnpm build
 ```
 打包后的文件将位于 `release/<version>/` 目录中。
 
+当前仓库的 `electron-builder` 配置里已经预留了 Windows、macOS、Linux 的 target，但目前仓库内实际验证和发布流程仅覆盖 Windows。macOS / Linux 如需对外宣称支持，建议先分别完成对应平台的本地验证、安装器验证和 CI 发布链路。
+
 发布前的安装器回归检查请参考 [docs/installer-qa-checklist.md](docs/installer-qa-checklist.md)。
+
+### GitHub Actions 自动发布
+
+仓库内置了 GitHub Actions 工作流 [`.github/workflows/release-build.yml`](.github/workflows/release-build.yml)，用于在 GitHub Release 发布后自动构建并上传 Windows 安装包。
+
+当前行为如下：
+
+1.  发布一个已发布状态的 GitHub Release。
+2.  Release 的 Tag 必须与 `package.json` 版本一致，例如 `v1.3.1` 对应 `"version": "1.3.1"`。
+3.  工作流会在 `windows-latest` 上执行 `pnpm install --frozen-lockfile` 和 `pnpm run build -- --win --publish never`。
+4.  构建完成后，工作流会执行一次最小自动验证：静默安装安装包、检查 `OpenListScraper.exe` 是否落盘，并尝试启动已安装应用做冒烟测试。
+5.  自动验证通过后，工作流会把以下文件上传到对应的 GitHub Release：
+    *   `OpenListScraper-Windows-<version>-Setup.exe`
+    *   `OpenListScraper-Windows-<version>-Setup.exe.blockmap`
+    *   `latest.yml`
+
+当前自动化不要求额外的 GitHub Secret，上传资产使用 Actions 内置的 `GITHUB_TOKEN` 即可。
+
+注意事项：
+
+*   目前工作流只自动构建 Windows 安装包，后续如需扩展 macOS/Linux，可在此工作流基础上增加矩阵构建。
+*   当前发布产物仍为未签名安装包；如果后续接入代码签名，需要额外配置如 `CSC_LINK`、`CSC_KEY_PASSWORD` 等 Secret。
+*   如果 Release Tag 与 `package.json` 版本不一致，工作流会直接失败，避免把错误版本的资产上传到 Release。
+*   当前自动验证只覆盖“能安装并至少成功启动”的基础冒烟测试，不能替代 [docs/installer-qa-checklist.md](docs/installer-qa-checklist.md) 中的完整人工安装器回归。
 
 ### 自动更新发布要求
 
