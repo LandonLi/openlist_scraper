@@ -7,6 +7,7 @@ export class TMDBProvider implements IMetadataProvider {
   private apiKey: string;
   private api: FetchClient;
   private imageBaseUrl: string = 'https://image.tmdb.org/t/p/w500';
+  private readonly fallbackLanguages = ['zh-CN', 'en-US'];
 
   constructor(apiKey: string) {
     this.apiKey = apiKey;
@@ -63,26 +64,54 @@ export class TMDBProvider implements IMetadataProvider {
 
   async searchTVShow(query: string): Promise<SearchResult[]> {
     try {
-      // Clean query: remove trailing hyphens and extra spaces
-      const cleanQuery = query.replace(/[-\s]+$/, '').trim();
+      const seen = new Set<string>();
+      const aggregatedResults: SearchResult[] = [];
 
-      const response = await this.api.get('/search/tv', {
-        params: { query: cleanQuery },
-      });
+      for (const language of this.fallbackLanguages) {
+        for (const candidate of this.buildSearchCandidates(query)) {
+          const response = await this.api.get('/search/tv', {
+            params: { query: candidate, language },
+          });
 
-      return response.data.results.map((item: any) => ({
-        id: item.id.toString(),
-        title: item.name,
-        originalTitle: item.original_name,
-        year: item.first_air_date ? item.first_air_date.substring(0, 4) : undefined,
-        poster: item.poster_path ? `${this.imageBaseUrl}${item.poster_path}` : undefined,
-        overview: item.overview,
-        provider: 'tmdb',
-      }));
+          const results = response.data.results.map((item: any) => ({
+            id: item.id.toString(),
+            title: item.name,
+            originalTitle: item.original_name,
+            year: item.first_air_date ? item.first_air_date.substring(0, 4) : undefined,
+            poster: item.poster_path ? `${this.imageBaseUrl}${item.poster_path}` : undefined,
+            overview: item.overview,
+            provider: 'tmdb',
+          }));
+
+          for (const result of results) {
+            if (!seen.has(result.id)) {
+              seen.add(result.id);
+              aggregatedResults.push(result);
+            }
+          }
+
+          if (aggregatedResults.length > 0) {
+            return aggregatedResults;
+          }
+        }
+      }
+
+      return [];
     } catch (error) {
       console.error('TMDB Search Error:', error);
       return [];
     }
+  }
+
+  private buildSearchCandidates(query: string): string[] {
+    const trimmed = query.replace(/[-\s._]+$/, '').trim();
+    const normalizedSeparators = trimmed.replace(/[._]+/g, ' ').replace(/\s+/g, ' ').trim();
+    const withoutYear = normalizedSeparators.replace(/\b(19|20)\d{2}\b/g, '').replace(/\s+/g, ' ').trim();
+    const candidates = [trimmed, normalizedSeparators, withoutYear]
+      .map((item) => item.trim())
+      .filter(Boolean);
+
+    return Array.from(new Set(candidates));
   }
 
   async getSeasonDetails(showId: string, season: number): Promise<EpisodeData[]> {
