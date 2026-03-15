@@ -49,6 +49,30 @@ This repository uses a lightweight GitHub-first workflow for bug fixes, release 
   - issue linkage such as `Fixes #123` when appropriate
 - After user validation, push the branch, open the PR, and merge it when approved.
 
+### 3.1 Standard delivery checklist
+
+- For any confirmed fix or tightly scoped feature, default to this GitHub workflow unless the user explicitly asks for a partial stop.
+- Recommended sequence:
+  1. confirm whether an existing GitHub issue already tracks the work
+  2. if not, create a focused issue with labels, milestone, and a clear problem statement
+  3. add the issue to the roadmap project when it belongs on the roadmap, and set `Track` and `Status` intentionally
+  4. create a dedicated `codex/` branch for that issue or fix
+  5. implement the change and verify it locally
+  6. commit with signing enabled
+  7. push the branch
+  8. open a PR that links the issue and includes testing notes
+  9. review PR readiness before merging:
+     - confirm the diff is focused
+     - confirm the merge state is clean
+     - confirm required checks are complete or intentionally absent
+  10. merge the PR and delete the remote branch
+  11. confirm the linked issue closed, or close it manually if auto-close did not happen
+  12. update the roadmap project item to `Done` when the work is shipped or no longer active
+  13. close the milestone when its scoped work is complete and released
+  14. prune local and remote-tracking branches so only active branches remain visible
+- Do not leave the workflow half-finished when the remaining steps are straightforward bookkeeping.
+- If you intentionally stop before merge or release, say exactly which of the above steps are still pending.
+
 ### 4. Issue lifecycle
 
 - When fixing an existing issue:
@@ -80,20 +104,29 @@ This repository uses a lightweight GitHub-first workflow for bug fixes, release 
 - Release flow for a shipped version:
   1. ensure the relevant fixes are merged
   2. merge the version bump PR
-  3. create the GitHub release and tag, for example `v1.2.2`
-  4. add release notes that summarize shipped fixes and known follow-ups
-  5. build release assets
-  6. upload release assets to the GitHub release
+  3. build and smoke-test the release locally when practical, especially for hotfixes or installer-sensitive changes
+  4. create and push the signed git tag, for example `v1.2.2`
+  5. create the GitHub release with release notes that summarize shipped fixes and known follow-ups
+  6. let the GitHub Actions release workflow build and upload the Windows release assets
+  7. verify the GitHub release contains the expected assets and that the workflow succeeded
 - Current Windows packaging flow:
   - run `pnpm build`
   - output goes to `release/<version>/`
-  - upload:
+  - build output includes:
     - `OpenListScraper-Windows-<version>-Setup.exe`
     - `OpenListScraper-Windows-<version>-Setup.exe.blockmap`
     - `latest.yml`
+- Default publishing rule:
+  - prefer GitHub Actions as the canonical path for release asset publishing
+  - do not manually upload release assets if the release workflow is expected to handle them
+  - use local manual upload only as an explicit fallback when:
+    - the workflow is unavailable or failing
+    - the user explicitly asks for a manual release
+    - a hotfix must ship before CI can be repaired
+  - if manual upload is used, say so clearly in the final handoff and avoid assuming the workflow artifacts are the source of truth
 - Notes:
-  - `.blockmap` and `latest.yml` are relevant for future auto-update support
-  - the app currently uses the default Electron icon unless issue `#13` is addressed
+  - `.blockmap` and `latest.yml` are required for the current Windows auto-update flow
+  - the app now has a GitHub Actions release workflow; local packaging is still useful for smoke testing and CI fallback
   - unsigned installers may trigger standard Windows warnings
 
 ### 7.1 Sandbox and escalation notes
@@ -105,10 +138,12 @@ This repository uses a lightweight GitHub-first workflow for bug fixes, release 
 - Treat `npm run build` as escalation-first for release work in Codex desktop.
   - Verified failure mode in sandbox: Vite/esbuild can fail with `spawn EPERM` while loading `vite.config.ts`
   - Release packaging should therefore request escalation before attempting the final production build
+  - Even when GitHub Actions is the default publishing path, a local escalated build is still useful for pre-release smoke testing or manual fallback publishing
 - Prefer repository-local scripts such as `npm run build`, `npm run lint`, and `npm run dev` over globally installed tools.
   - `pnpm` and `corepack` may be unavailable in the sandbox shell even when the repo uses `pnpm`
   - Avoid depending on ad hoc global binaries during release prep unless escalation is already approved
 - If a release wrap-up depends on both a signed git push and GitHub release operations, call out the expected escalation points up front before starting the final publishing sequence.
+- When a GitHub release is expected to trigger the release workflow, avoid racing it with a redundant manual asset upload unless you are intentionally using the fallback path.
 - Treat signed git operations as a separate preflight check during release wrap-up.
   - Before committing, tagging, or pushing, verify that git signing works in the current environment
   - If commit signing or tag signing fails, stop and ask the user how they want to proceed
@@ -141,6 +176,11 @@ This repository uses a lightweight GitHub-first workflow for bug fixes, release 
 - Prefer this sequence:
   - finish the active product-facing item
   - then move to the next release or engineering item
+- For hotfixes and patch releases:
+  - add the issue to the project if it is user-visible, release-relevant, or needed for roadmap continuity
+  - set `Track` to `Release` unless the work is clearly product UX or engineering debt instead
+  - set `Status` to `In Progress` while the fix is actively being implemented
+  - set `Status` to `Done` after the PR is merged and the release or wrap-up is complete
 
 ### 10. Current planning baseline
 
@@ -160,6 +200,10 @@ This repository uses a lightweight GitHub-first workflow for bug fixes, release 
 - Prefer verified fixes over speculative fixes.
 - After manual user testing succeeds, follow through and complete the GitHub bookkeeping instead of stopping at code changes.
 - If a release has already shipped, record follow-up work as new issues instead of mutating the meaning of the shipped issue.
+- When cleaning branches after merge or release:
+  - delete merged local `codex/` branches
+  - delete merged remote branches or confirm they were deleted by PR merge
+  - run a prune step so stale `origin/codex/*` refs do not linger locally
 - Keep repository state understandable for the next session:
   - focused PRs
   - explicit milestones
