@@ -1,6 +1,7 @@
 import { IMatcher, MatchResult } from '../interfaces/IMatcher';
 import { ILLMProvider } from '../interfaces/ILLMProvider';
 import path from 'path';
+import type { EpisodeData } from '../interfaces/IMetadataProvider';
 
 export class LLMEngine implements IMatcher {
   private llm: ILLMProvider;
@@ -15,14 +16,14 @@ export class LLMEngine implements IMatcher {
     this.debugLogger = logger;
   }
 
-  private logDebug(msg: string, data?: any) {
+  private logDebug(msg: string, data?: unknown) {
     if (this.debugLogger) {
       const dataStr = data ? `\nData: ${JSON.stringify(data, null, 2)}` : '';
       this.debugLogger(`${msg}${dataStr}`);
     }
   }
 
-  async matchEpisodeFromList(filename: string, episodeList: any[]): Promise<number | null> {
+  async matchEpisodeFromList(filename: string, episodeList: EpisodeData[]): Promise<number | null> {
     const listStr = episodeList.map(e => `E${e.episodeNumber}: ${e.title} (${e.overview?.substring(0, 50)}...)`).join('\n');
 
     const prompt = `

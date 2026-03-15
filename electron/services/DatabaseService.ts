@@ -80,6 +80,10 @@ export interface ScrapedMedia {
   scrapedAt: string;
 }
 
+interface TableInfoRow {
+  name: string;
+}
+
 export class DatabaseService {
   private db: BetterSqliteDatabase;
 
@@ -122,7 +126,7 @@ export class DatabaseService {
     `);
 
     // Migration for existing databases
-    const tableInfo = this.db.prepare("PRAGMA table_info(scraped_media)").all() as any[];
+    const tableInfo = this.db.prepare("PRAGMA table_info(scraped_media)").all() as TableInfoRow[];
     const columns = tableInfo.map(c => c.name);
     
     if (!columns.includes('air_date')) {

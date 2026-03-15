@@ -1,7 +1,7 @@
 import fs from 'fs-extra';
 import path from 'path';
 import { Readable } from 'stream';
-import { IMediaSource, FileItem } from '../interfaces/IMediaSource';
+import { IMediaSource, FileItem, type BatchRenameItem, type LocalSourceConnectConfig } from '../interfaces/IMediaSource';
 
 export class LocalSource implements IMediaSource {
   id: string;
@@ -14,7 +14,7 @@ export class LocalSource implements IMediaSource {
     this.name = name;
   }
 
-  async connect(config: { path: string }): Promise<boolean> {
+  async connect(config: LocalSourceConnectConfig): Promise<boolean> {
     try {
       if (!await fs.pathExists(config.path)) {
         return false;
@@ -74,7 +74,12 @@ export class LocalSource implements IMediaSource {
     }
   }
 
-  async batchRename(srcDir: string, renameObjects: Array<{ src_name: string, new_name: string }>, _batchSize?: number, onProgress?: (current: number, total: number) => void): Promise<boolean> {
+  async batchRename(
+    srcDir: string,
+    renameObjects: BatchRenameItem[],
+    _batchSize?: number,
+    onProgress?: (current: number, total: number) => void,
+  ): Promise<boolean> {
     try {
       const resolvedDir = this.resolveWithinRoot(srcDir);
       let processed = 0;

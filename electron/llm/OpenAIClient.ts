@@ -1,7 +1,8 @@
 import OpenAI from 'openai';
 import { ILLMProvider, LLMConfig } from '../interfaces/ILLMProvider';
 import { ProxyHelper } from '../utils/ProxyHelper';
-import fetch from 'node-fetch';
+import fetch, { type RequestInfo, type RequestInit as NodeFetchRequestInit } from 'node-fetch';
+import { getErrorMessage } from '../utils/errors';
 
 export class OpenAIClient implements ILLMProvider {
   name: string = 'OpenAI';
@@ -14,11 +15,13 @@ export class OpenAIClient implements ILLMProvider {
       apiKey: config.apiKey,
       baseURL: config.baseURL, // Optional: supports generic OpenAI compatible endpoints
       dangerouslyAllowBrowser: false, // We are in Node.js main process
-      fetch: async (url, init) => {
-        return fetch(url as any, {
-          ...init as any,
+      fetch: async (url: string | URL | Request, init?: RequestInit) => {
+        const requestInit = {
+          ...(init ?? {}),
           agent: proxyAgent,
-        }) as unknown as Promise<Response>;
+        } as unknown as NodeFetchRequestInit;
+
+        return fetch(url as unknown as RequestInfo, requestInit) as unknown as Promise<Response>;
       },
     });
     this.model = config.model || 'gpt-3.5-turbo';
@@ -29,8 +32,8 @@ export class OpenAIClient implements ILLMProvider {
     try {
       const response = await this.client.models.list();
       return response.data.map(m => m.id);
-    } catch (e: any) {
-      throw new Error(`Failed to list models: ${e.message}`);
+    } catch (error) {
+      throw new Error(`Failed to list models: ${getErrorMessage(error)}`);
     }
   }
 
@@ -63,7 +66,7 @@ export class OpenAIClient implements ILLMProvider {
     const content = completion.choices[0]?.message?.content || '{}';
     try {
       return JSON.parse(content) as T;
-    } catch (e) {
+    } catch {
       console.error('Failed to parse JSON from LLM:', content);
       throw new Error('Invalid JSON response from LLM');
     }

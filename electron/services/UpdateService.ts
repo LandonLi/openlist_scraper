@@ -1,19 +1,13 @@
 import { app, BrowserWindow } from 'electron';
 import log from 'electron-log';
 import { autoUpdater, type ProgressInfo, type UpdateInfo } from 'electron-updater';
+import type { CheckUpdateResult } from '../../shared/ipc';
+import { getErrorMessage } from '../utils/errors';
 
 type ReleaseNoteEntry = {
   note: string | null;
   version: string;
 };
-
-export interface CheckUpdateResult {
-  hasUpdate: boolean;
-  currentVersion: string;
-  latestVersion: string;
-  releaseNote?: string;
-  error?: string;
-}
 
 export class UpdateService {
   private mainWindow: BrowserWindow | null = null;
@@ -79,13 +73,13 @@ export class UpdateService {
         currentVersion,
         latestVersion: currentVersion,
       };
-    } catch (error: any) {
+    } catch (error) {
       log.error('Check update failed', error);
       return {
         hasUpdate: false,
         currentVersion,
         latestVersion: currentVersion,
-        error: error?.message || '检查更新失败',
+        error: getErrorMessage(error, '检查更新失败'),
       };
     }
   }
@@ -101,11 +95,11 @@ export class UpdateService {
     try {
       await autoUpdater.downloadUpdate();
       return { success: true };
-    } catch (error: any) {
+    } catch (error) {
       log.error('Download update failed', error);
       return {
         success: false,
-        error: error?.message || '下载更新失败',
+        error: getErrorMessage(error, '下载更新失败'),
       };
     }
   }
