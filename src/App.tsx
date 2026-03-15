@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState, type CSSProperties, type ReactNode } from 'react';
+import { useCallback, useEffect, useRef, useState, type CSSProperties, type ReactNode } from 'react';
 import { useAppStore, LogType, ScrapedMediaRecord } from './stores/appStore';
 import { Settings, Database, Globe, Play, Eye, EyeOff, CheckCircle2, AlertCircle, RefreshCw, Save, ArrowRight, Minus, Square, X, Folder, Network, Zap, File, Clapperboard, ChevronUp, ChevronDown, LayoutGrid, List, Wand2, Sun, Moon, ArrowLeft, CornerLeftUp, Check, Calendar, Clock, Trash2, Download, Sparkles } from 'lucide-react';
 import clsx from 'clsx';
@@ -370,6 +370,7 @@ export default function App() {
   const [downloadProgress, setDownloadProgress] = useState(0);
   const [isUpdateReady, setIsUpdateReady] = useState(false);
   const [isRefreshingHistory, setIsRefreshingHistory] = useState(false);
+  const updateCheckInFlightRef = useRef(false);
 
   const refreshMedia = useCallback(async (options?: { silent?: boolean }) => {
     setIsRefreshingHistory(true);
@@ -1063,11 +1064,12 @@ export default function App() {
   const isConfigured = (sourceType === 'local' && localPath) || (sourceType === 'openlist' && openListUrl);
 
   const runUpdateCheck = useCallback(async (options?: { silent?: boolean }) => {
-    if (isCheckingUpdate) return;
+    if (updateCheckInFlightRef.current) return;
 
     const silent = options?.silent ?? false;
-    setIsCheckingUpdate(true);
+    updateCheckInFlightRef.current = true;
     if (!silent) {
+      setIsCheckingUpdate(true);
       addLog('正在检查更新...', 'info');
     }
 
@@ -1095,9 +1097,12 @@ export default function App() {
         addLog(`检查更新出错: ${getErrorMessage(error)}`, 'error');
       }
     } finally {
-      setIsCheckingUpdate(false);
+      updateCheckInFlightRef.current = false;
+      if (!silent) {
+        setIsCheckingUpdate(false);
+      }
     }
-  }, [addLog, isCheckingUpdate]);
+  }, [addLog]);
 
   const handleCheckUpdate = async () => {
     await runUpdateCheck();
