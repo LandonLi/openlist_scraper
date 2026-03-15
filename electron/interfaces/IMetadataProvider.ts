@@ -1,23 +1,6 @@
-export interface SearchResult {
-  id: string; // Provider specific ID (e.g., TMDB ID)
-  title: string;
-  originalTitle?: string;
-  year?: string;
-  poster?: string;
-  overview?: string;
-  provider: string; // 'tmdb', 'tvdb', etc.
-}
+import type { EpisodeData, SearchResult } from '../../shared/types';
 
-export interface EpisodeData {
-  id: string;
-  seasonNumber: number;
-  episodeNumber: number;
-  title: string;
-  overview?: string;
-  airDate?: string;
-  stillPath?: string;
-  runtime?: number;
-}
+export type { EpisodeData, SearchResult };
 
 export interface IMetadataProvider {
   name: string;
@@ -25,4 +8,5 @@ export interface IMetadataProvider {
   getSeasonDetails(showId: string, season: number): Promise<EpisodeData[]>;
   getEpisodeDetails(showId: string, season: number, episode: number): Promise<EpisodeData | null>;
   setDebugLogger?(logger: (message: string) => void): void;
+  setProxy?(proxyUrl: string): void;
 }

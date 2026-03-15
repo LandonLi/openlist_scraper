@@ -1,6 +1,11 @@
 import { FetchClient } from '../utils/FetchClient';
 import { IMetadataProvider, SearchResult, EpisodeData } from '../interfaces/IMetadataProvider';
 import { ProxyHelper } from '../utils/ProxyHelper';
+import type {
+  TmdbEpisodeItem,
+  TmdbSearchResponse,
+  TmdbSeasonResponse,
+} from '../../shared/types';
 
 export class TMDBProvider implements IMetadataProvider {
   name: string = 'TMDB';
@@ -25,7 +30,6 @@ export class TMDBProvider implements IMetadataProvider {
     // Add request interceptor for logging
     // Add request interceptor for logging
     this.api.interceptors.request.use(config => {
-      // @ts-ignore
       this.logDebug(`Request: ${config.method?.toUpperCase()} ${config.url}`, config.params);
       return config;
     });
@@ -34,7 +38,11 @@ export class TMDBProvider implements IMetadataProvider {
       this.logDebug(`Response: ${response.status} ${response.config.url}`, { data: response.data });
       return response;
     }, error => {
-      this.logDebug(`Response Error: ${error.message}`, error.response?.data);
+      if (FetchClient.isFetchError(error)) {
+        this.logDebug(`Response Error: ${error.message}`, error.response?.data);
+      } else {
+        this.logDebug('Response Error', error);
+      }
       throw error;
     });
   }
@@ -55,7 +63,7 @@ export class TMDBProvider implements IMetadataProvider {
     }
   }
 
-  private logDebug(msg: string, data?: any) {
+  private logDebug(msg: string, data?: unknown) {
     if (this.debugLogger) {
       const dataStr = data ? `\nData: ${JSON.stringify(data, null, 2)}` : '';
       this.debugLogger(`${msg}${dataStr}`);
@@ -69,11 +77,11 @@ export class TMDBProvider implements IMetadataProvider {
 
       for (const language of this.fallbackLanguages) {
         for (const candidate of this.buildSearchCandidates(query)) {
-          const response = await this.api.get('/search/tv', {
+          const response = await this.api.get<TmdbSearchResponse>('/search/tv', {
             params: { query: candidate, language },
           });
 
-          const results = response.data.results.map((item: any) => ({
+          const results = response.data.results.map((item) => ({
             id: item.id.toString(),
             title: item.name,
             originalTitle: item.original_name,
@@ -116,8 +124,8 @@ export class TMDBProvider implements IMetadataProvider {
 
   async getSeasonDetails(showId: string, season: number): Promise<EpisodeData[]> {
     try {
-      const response = await this.api.get(`/tv/${showId}/season/${season}`);
-      return response.data.episodes.map((data: any) => ({
+      const response = await this.api.get<TmdbSeasonResponse>(`/tv/${showId}/season/${season}`);
+      return response.data.episodes.map((data: TmdbEpisodeItem) => ({
         id: data.id.toString(),
         seasonNumber: data.season_number,
         episodeNumber: data.episode_number,
@@ -135,7 +143,7 @@ export class TMDBProvider implements IMetadataProvider {
 
   async getEpisodeDetails(showId: string, season: number, episode: number): Promise<EpisodeData | null> {
     try {
-      const response = await this.api.get(`/tv/${showId}/season/${season}/episode/${episode}`, {
+      const response = await this.api.get<TmdbEpisodeItem>(`/tv/${showId}/season/${season}/episode/${episode}`, {
         params: {
           append_to_response: 'credits,images' // Optional: add more details for the "detailed view"
         }
@@ -152,7 +160,7 @@ export class TMDBProvider implements IMetadataProvider {
         stillPath: data.still_path ? `${this.imageBaseUrl}${data.still_path}` : undefined,
         runtime: data.runtime,
       };
-    } catch (error: any) {
+    } catch (error) {
       // 404 is expected if episode doesn't exist
       // 404 is expected if episode doesn't exist
       if (FetchClient.isFetchError(error) && error.response?.status === 404) {

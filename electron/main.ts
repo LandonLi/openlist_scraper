@@ -3,6 +3,25 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import ElectronStore from 'electron-store';
 import fs from 'fs-extra';
+import type {
+  ConfigKey,
+  ConfigValueMap,
+  ExplorerListRequest,
+  FetchMetadataRequest,
+  LlmTestRequest,
+  OpenListTestRequest,
+  ScanSelectedRequest,
+  ScanSourceRequest,
+  SmartIdentifyRequest,
+} from '../shared/ipc';
+import type {
+  EpisodeMatchItem,
+  LogLevel,
+  OpenListListResponseData,
+  OpenListResponse,
+  RuleDefinition,
+} from '../shared/types';
+import { getNestedErrorMessage, toErrorResponse } from './utils/errors';
 
 // Core Services
 import { ScannerService } from './services/ScannerService';
@@ -15,6 +34,7 @@ import { OpenAIClient } from './llm/OpenAIClient';
 import { MetadataFactory } from './metadata/factory';
 import { SourceFactory } from './sources/factory';
 import { FetchClient } from './utils/FetchClient';
+import type { IMetadataProvider } from './interfaces/IMetadataProvider';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -32,7 +52,7 @@ let win: BrowserWindow | null = null;
 let store: ElectronStore;
 let scannerService: ScannerService;
 let dbService: DatabaseService;
-let metadataProvider: any;
+let metadataProvider: IMetadataProvider;
 let llmClient: OpenAIClient;
 let llmEngine: LLMEngine;
 let regexEngine: RegexEngine;
@@ -42,7 +62,7 @@ function buildMetadataProvider() {
   const currentProxyUrl = store.get('proxy_url') as string || '';
   const provider = MetadataFactory.create('tmdb', { apiKey: currentTmdbKey });
 
-  if ('setProxy' in provider) (provider as any).setProxy(currentProxyUrl);
+  provider.setProxy?.(currentProxyUrl);
 
   return provider;
 }
@@ -57,39 +77,64 @@ function syncMetadataProvider() {
 }
 
 function registerIpcHandlers() {
-  ipcMain.handle('config:get', (_, key) => store.get(key));
-  ipcMain.handle('config:set', async (_, key, value) => {
+  ipcMain.handle('config:get', (_, key: ConfigKey) => {
+    return store.get(key) as ConfigValueMap[typeof key] | undefined;
+  });
+  ipcMain.handle('config:set', async (_, key: ConfigKey, value: ConfigValueMap[typeof key]) => {
     store.set(key, value);
     if (key === 'proxy_url') {
-      if (win) value ? await win.webContents.session.setProxy({ proxyRules: value as string }) : await win.webContents.session.setProxy({});
-      if (scannerService) scannerService.setProxy(value as string);
+      const proxyValue = value as ConfigValueMap['proxy_url'];
+      if (win) {
+        if (proxyValue) {
+          await win.webContents.session.setProxy({ proxyRules: proxyValue });
+        } else {
+          await win.webContents.session.setProxy({});
+        }
+      }
+      if (scannerService) scannerService.setProxy(proxyValue);
     }
     if (key === 'log_level' && scannerService) {
-      scannerService.setLogLevel(value as any);
+      scannerService.setLogLevel(value as ConfigValueMap['log_level']);
     }
     if ((key === 'tmdb_api_key' || key === 'proxy_url') && scannerService) {
       syncMetadataProvider();
     }
   });
 
-  ipcMain.handle('llm:test', async (_, config) => {
+  ipcMain.handle('llm:test', async (_, config: LlmTestRequest) => {
     try {
       const testClient = new OpenAIClient();
       testClient.configure({ apiKey: config.apiKey, baseURL: config.baseURL, model: 'gpt-3.5-turbo' });
       const models = await testClient.listModels();
       return { success: true, models };
-    } catch (e: any) { return { success: false, error: e.message }; }
+    } catch (error) {
+      return toErrorResponse(error, 'LLM 连接测试失败');
+    }
   });
 
   ipcMain.handle('tmdb:test', async (_, token) => {
     try {
       const proxyUrl = store.get('proxy_url') as string;
       const client = FetchClient.create({ proxyUrl, timeout: 5000 });
-      const response = await client.get('https://api.themoviedb.org/3/authentication', {
+      const response = await client.get<{ success?: boolean; status_message?: string }>('https://api.themoviedb.org/3/authentication', {
         headers: { Authorization: `Bearer ${token}`, Accept: 'application/json' }
       });
       return { success: response.data?.success };
-    } catch (e: any) { return { success: false, error: e.response?.data?.status_message || e.message }; }
+    } catch (error) {
+      return {
+        success: false,
+        error: getNestedErrorMessage(
+          error,
+          (value) => {
+            const data = value.response?.data;
+            return typeof data === 'object' && data !== null && 'status_message' in data
+              ? String((data as { status_message?: string }).status_message ?? '')
+              : undefined;
+          },
+          'TMDB 连接测试失败',
+        ),
+      };
+    }
   });
 
   ipcMain.handle('proxy:test', async () => {
@@ -98,22 +143,38 @@ function registerIpcHandlers() {
       const client = FetchClient.create({ proxyUrl, timeout: 5000 });
       await client.get('https://www.gstatic.com/generate_204');
       return { success: true };
-    } catch (e: any) { return { success: false, error: e.message }; }
+    } catch (error) {
+      return toErrorResponse(error, '代理连接测试失败');
+    }
   });
 
-  ipcMain.handle('openlist:test', async (_, config) => {
+  ipcMain.handle('openlist:test', async (_, config: OpenListTestRequest) => {
     try {
       const proxyUrl = store.get('proxy_url') as string;
       const client = FetchClient.create({ proxyUrl, timeout: 5000 });
       const baseURL = config.url.replace(/\/$/, '');
-      const response = await client.get(`${baseURL}/api/me`, {
+      const response = await client.get<OpenListResponse>(`${baseURL}/api/me`, {
         headers: { 'Authorization': config.token }
       });
       return { success: response.status === 200 && response.data?.code === 200 };
-    } catch (e: any) { return { success: false, error: e.response?.data?.message || e.message }; }
+    } catch (error) {
+      return {
+        success: false,
+        error: getNestedErrorMessage(
+          error,
+          (value) => {
+            const data = value.response?.data;
+            return typeof data === 'object' && data !== null && 'message' in data
+              ? String((data as { message?: string }).message ?? '')
+              : undefined;
+          },
+          'OpenList 连接测试失败',
+        ),
+      };
+    }
   });
 
-  ipcMain.handle('explorer:list', async (_, { type, path: targetPath, config }) => {
+  ipcMain.handle('explorer:list', async (_, { type, path: targetPath, config }: ExplorerListRequest) => {
     try {
       if (type === 'local') {
         const fullPath = targetPath || config.localPath;
@@ -133,19 +194,33 @@ function registerIpcHandlers() {
         return { success: true, data, currentPath: fullPath };
       }
       else if (type === 'openlist') {
+        if (!config.openListUrl) {
+          return { success: false, error: 'OpenList 地址未配置' };
+        }
         const proxyUrl = store.get('proxy_url') as string;
         const client = FetchClient.create({ proxyUrl });
         const baseURL = config.openListUrl.replace(/\/$/, '');
         const reqPath = targetPath || '/';
-        const response = await client.post(`${baseURL}/api/fs/list`, { path: reqPath, password: "", page: 1, per_page: 0, refresh: true }, { headers: { 'Authorization': config.openListToken } });
+        const response = await client.post<OpenListResponse<OpenListListResponseData>>(
+          `${baseURL}/api/fs/list`,
+          { path: reqPath, password: "", page: 1, per_page: 0, refresh: true },
+          { headers: { 'Authorization': config.openListToken ?? '' } },
+        );
         if (response.data.code !== 200) return { success: false, error: response.data.message };
-        const content = response.data.data.content || [];
-        const items = content.map((item: any) => ({ name: item.name, path: path.posix.join(reqPath, item.name), isDir: item.is_dir, size: item.size }));
-        items.sort((a: any, b: any) => (a.isDir === b.isDir ? a.name.localeCompare(b.name) : a.isDir ? -1 : 1));
+        const content = response.data.data?.content || [];
+        const items = content.map((item) => ({
+          name: item.name,
+          path: path.posix.join(reqPath, item.name),
+          isDir: item.is_dir,
+          size: item.size,
+        }));
+        items.sort((a, b) => (a.isDir === b.isDir ? a.name.localeCompare(b.name) : a.isDir ? -1 : 1));
         return { success: true, data: items, currentPath: reqPath };
       }
       return { success: false, error: '未知的数据源类型' };
-    } catch (e: any) { return { success: false, error: e.message }; }
+    } catch (error) {
+      return toErrorResponse(error, '目录加载失败');
+    }
   });
 
   ipcMain.handle('dialog:openDirectory', async () => {
@@ -158,7 +233,7 @@ function registerIpcHandlers() {
   ipcMain.on('window:maximize', () => win?.isMaximized() ? win.unmaximize() : win?.maximize());
   ipcMain.on('window:close', () => win?.close());
 
-  ipcMain.handle('scanner:start', async (_, sourceConfig) => {
+  ipcMain.handle('scanner:start', async (_, sourceConfig: ScanSourceRequest) => {
     try {
       const source = SourceFactory.create(sourceConfig.type, sourceConfig.id, 'Source');
       const connectConfig = sourceConfig.type === 'local'
@@ -180,12 +255,16 @@ function registerIpcHandlers() {
       scannerService.setOpenListBatchSize(parseInt(batchSize, 10));
 
       const videoExtensions = store.get('video_extensions') as string || 'mkv,mp4,avi,mov,iso,rmvb';
-      scannerService.scanSource(source, sourceConfig.path, videoExtensions).catch(err => console.error('Scan Error:', err));
+      scannerService.scanSource(source, sourceConfig.path, videoExtensions).catch((error: unknown) => {
+        console.error('Scan Error:', error);
+      });
       return { success: true };
-    } catch (e: any) { return { success: false, error: e.message }; }
+    } catch (error) {
+      return toErrorResponse(error, '扫描启动失败');
+    }
   });
 
-  ipcMain.handle('scanner:scan-selected', async (_, sourceConfig) => {
+  ipcMain.handle('scanner:scan-selected', async (_, sourceConfig: ScanSelectedRequest) => {
     try {
       const source = SourceFactory.create(sourceConfig.type, sourceConfig.id, 'Source');
       const connectConfig = sourceConfig.type === 'local'
@@ -207,12 +286,16 @@ function registerIpcHandlers() {
       scannerService.setOpenListBatchSize(parseInt(batchSize, 10));
 
       const videoExtensions = store.get('video_extensions') as string || 'mkv,mp4,avi,mov,iso,rmvb';
-      scannerService.scanSelectedFiles(source, sourceConfig.paths, videoExtensions).catch(err => console.error('Scan Selected Error:', err));
+      scannerService.scanSelectedFiles(source, sourceConfig.paths, videoExtensions).catch((error: unknown) => {
+        console.error('Scan Selected Error:', error);
+      });
       return { success: true };
-    } catch (e: any) { return { success: false, error: e.message }; }
+    } catch (error) {
+      return toErrorResponse(error, '选中文件扫描启动失败');
+    }
   });
 
-  ipcMain.handle('scanner:identify-single', async (_, sourceConfig) => {
+  ipcMain.handle('scanner:identify-single', async (_, sourceConfig: ScanSourceRequest) => {
     try {
       const source = SourceFactory.create(sourceConfig.type, sourceConfig.id, 'Source');
       const connectConfig = sourceConfig.type === 'local'
@@ -234,9 +317,13 @@ function registerIpcHandlers() {
       scannerService.setOpenListBatchSize(parseInt(batchSize, 10));
 
       const videoExtensions = store.get('video_extensions') as string || 'mkv,mp4,avi,mov,iso,rmvb';
-      scannerService.identifySingleFile(source, sourceConfig.path, videoExtensions).catch(err => console.error('Identify Error:', err));
+      scannerService.identifySingleFile(source, sourceConfig.path, videoExtensions).catch((error: unknown) => {
+        console.error('Identify Error:', error);
+      });
       return { success: true };
-    } catch (e: any) { return { success: false, error: e.message }; }
+    } catch (error) {
+      return toErrorResponse(error, '单文件识别启动失败');
+    }
   });
 
   ipcMain.handle('media:getAll', () => dbService.getAllMedia());
@@ -246,12 +333,12 @@ function registerIpcHandlers() {
 
   ipcMain.handle('app:getVersion', () => app.getVersion());
 
-  ipcMain.handle('scanner:fetch-metadata', async (event, { matches, seriesId }) => {
+  ipcMain.handle('scanner:fetch-metadata', async (event, { matches, seriesId }: FetchMetadataRequest) => {
     try {
       const total = matches.length;
       console.log(`[元数据获取] 开始获取 ${total} 个文件的元数据，seriesId: ${seriesId}`);
 
-      const updatedMatches = [];
+      const updatedMatches: EpisodeMatchItem[] = [];
       let completed = 0;
       const concurrencyLimit = 10; // 并发限制为10个请求
 
@@ -259,7 +346,7 @@ function registerIpcHandlers() {
       event.sender.send('metadata-progress', { current: 0, total });
 
       // 批量处理函数
-      const processBatch = async (items: any[]) => {
+      const processBatch = async (items: EpisodeMatchItem[]) => {
         const promises = items.map(async (item) => {
           try {
             const metadata = await metadataProvider.getEpisodeDetails(
@@ -279,8 +366,8 @@ function registerIpcHandlers() {
               },
               metadata: metadata || undefined
             };
-          } catch (e) {
-            console.error(`Failed to fetch metadata for ${item.file.name}:`, e);
+          } catch (error) {
+            console.error(`Failed to fetch metadata for ${item.file.name}:`, error);
             completed++;
             event.sender.send('metadata-progress', { current: completed, total });
             return item;
@@ -302,15 +389,15 @@ function registerIpcHandlers() {
 
       console.log(`[元数据获取] 完成！共处理 ${total} 个文件`);
       return { success: true, matches: updatedMatches };
-    } catch (e: any) {
-      console.error('[元数据获取] 错误:', e);
-      return { success: false, error: e.message };
+    } catch (error) {
+      console.error('[元数据获取] 错误:', error);
+      return toErrorResponse(error, '元数据获取失败');
     }
   });
 
-  ipcMain.handle('scanner:smart-identify', async (_, { unmatchedFiles }) => {
+  ipcMain.handle('scanner:smart-identify', async (_, { unmatchedFiles }: SmartIdentifyRequest) => {
     try {
-      const results = [];
+      const results: EpisodeMatchItem[] = [];
 
       for (const fileData of unmatchedFiles) {
         try {
@@ -326,8 +413,8 @@ function registerIpcHandlers() {
               source: 'llm_failed'
             }
           });
-        } catch (e) {
-          console.error(`LLM识别失败: ${fileData.file.name}:`, e);
+        } catch (error) {
+          console.error(`LLM识别失败: ${fileData.file.name}:`, error);
           results.push({
             ...fileData,
             match: { success: false, source: 'llm_error' }
@@ -336,8 +423,8 @@ function registerIpcHandlers() {
       }
 
       return { success: true, results };
-    } catch (e: any) {
-      return { success: false, error: e.message };
+    } catch (error) {
+      return toErrorResponse(error, '智能识别失败');
     }
   });
 
@@ -345,21 +432,21 @@ function registerIpcHandlers() {
     const defaultPath = path.join(process.env.DIST_ELECTRON || '', 'resources/default_rules.json');
     const userPath = path.join(app.getPath('userData'), 'custom_rules.json');
 
-    let rules: any[] = [];
+    let rules: RuleDefinition[] = [];
     if (await fs.pathExists(defaultPath)) rules = await fs.readJSON(defaultPath);
 
     if (await fs.pathExists(userPath)) {
-      const userRules = await fs.readJSON(userPath);
+      const userRules = await fs.readJSON(userPath) as RuleDefinition[];
       // Deduplicate by ID: User rules take precedence
-      const ruleMap = new Map();
+      const ruleMap = new Map<string, RuleDefinition>();
       rules.forEach(r => ruleMap.set(r.id, r));
-      userRules.forEach((r: any) => ruleMap.set(r.id, r));
+      userRules.forEach((rule) => ruleMap.set(rule.id, rule));
       rules = Array.from(ruleMap.values());
     }
     return rules;
   });
 
-  ipcMain.handle('rules:save', async (_, rules) => {
+  ipcMain.handle('rules:save', async (_, rules: RuleDefinition[]) => {
     const userPath = path.join(app.getPath('userData'), 'custom_rules.json');
     await fs.writeJSON(userPath, rules, { spaces: 2 });
     return { success: true };
@@ -427,8 +514,8 @@ app.whenReady().then(() => {
 
     scannerService = new ScannerService(regexEngine, llmEngine, metadataProvider, dbService);
 
-    const savedLogLevel = store.get('log_level') as string || 'info';
-    scannerService.setLogLevel(savedLogLevel as any);
+    const savedLogLevel = store.get('log_level') as LogLevel || 'info';
+    scannerService.setLogLevel(savedLogLevel);
 
     syncMetadataProvider();
 

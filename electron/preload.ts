@@ -1,12 +1,29 @@
-import { contextBridge, ipcRenderer } from 'electron';
+import { contextBridge, ipcRenderer, type IpcRendererEvent } from 'electron';
+import type { RendererEventChannel, RendererEventPayloadMap, WindowIpcRenderer } from '../shared/ipc';
 
-contextBridge.exposeInMainWorld('ipcRenderer', {
-  invoke: (channel: string, ...args: any[]) => ipcRenderer.invoke(channel, ...args),
-  on: (channel: string, func: (...args: any[]) => void) => {
-    const subscription = (_event: any, ...args: any[]) => func(...args);
+const api = {
+  invoke: (channel: string, ...args: unknown[]) =>
+    ipcRenderer.invoke(channel, ...args) as Promise<unknown>,
+  on: <K extends RendererEventChannel>(
+    channel: K,
+    func: RendererEventPayloadMap[K] extends undefined
+      ? () => void
+      : (payload: RendererEventPayloadMap[K]) => void,
+  ) => {
+    const subscription = (_event: IpcRendererEvent, payload?: RendererEventPayloadMap[K]) => {
+      if (payload === undefined) {
+        (func as () => void)();
+        return;
+      }
+
+      (func as (value: RendererEventPayloadMap[K]) => void)(payload);
+    };
     ipcRenderer.on(channel, subscription);
     return () => ipcRenderer.removeListener(channel, subscription);
   },
-  off: (channel: string, func: (...args: any[]) => void) => ipcRenderer.removeListener(channel, func),
-  send: (channel: string, ...args: any[]) => ipcRenderer.send(channel, ...args),
-});
+  send: (channel: string, ...args: unknown[]) => {
+    ipcRenderer.send(channel, ...args);
+  },
+} as WindowIpcRenderer;
+
+contextBridge.exposeInMainWorld('ipcRenderer', api);

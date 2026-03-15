@@ -1,14 +1,16 @@
 import { Readable } from 'stream';
-import { IMediaSource, FileItem } from '../interfaces/IMediaSource';
+import { IMediaSource, FileItem, type BatchRenameItem, type OpenListSourceConnectConfig } from '../interfaces/IMediaSource';
 import { FetchClient } from '../utils/FetchClient';
 import path from 'path';
 import { ProxyHelper } from '../utils/ProxyHelper';
+import type { OpenListListResponseData, OpenListResponse } from '../../shared/types';
+import { getNestedErrorMessage } from '../utils/errors';
 
 // Placeholder for OpenList (assuming HTTP based)
 export class OpenListSource implements IMediaSource {
   id: string;
   name: string;
-  type: 'openlist' = 'openlist';
+  type = 'openlist' as const;
   private baseUrl: string = '';
   private token: string = '';
   private api: FetchClient;
@@ -19,7 +21,7 @@ export class OpenListSource implements IMediaSource {
     this.api = FetchClient.create();
   }
 
-  async connect(config: { url: string, token?: string, proxyUrl?: string }): Promise<boolean> {
+  async connect(config: OpenListSourceConnectConfig): Promise<boolean> {
     this.baseUrl = config.url.replace(/\/$/, '');
     this.token = config.token || '';
 
@@ -35,12 +37,12 @@ export class OpenListSource implements IMediaSource {
     }
 
     try {
-      const response = await this.api.get(`${this.baseUrl}/api/me`, {
+      const response = await this.api.get<OpenListResponse>(`${this.baseUrl}/api/me`, {
         headers: { 'Authorization': this.token },
         timeout: 5000
       });
       return response.status === 200 && response.data?.code === 200;
-    } catch (e) {
+    } catch {
       return false;
     }
   }
@@ -57,7 +59,7 @@ export class OpenListSource implements IMediaSource {
     const reqPath = dirPath.startsWith('/') ? dirPath : '/' + dirPath;
 
     try {
-      const response = await this.api.post(`${this.baseUrl}/api/fs/list`, {
+      const response = await this.api.post<OpenListResponse<OpenListListResponseData>>(`${this.baseUrl}/api/fs/list`, {
         path: reqPath,
         password: "",
         page: 1,
@@ -71,41 +73,42 @@ export class OpenListSource implements IMediaSource {
         throw new Error(response.data.message || 'Failed to list directory');
       }
 
-      return response.data.data.content.map((item: any) => ({
+      return (response.data.data?.content ?? []).map((item) => ({
         name: item.name,
         path: path.posix.join(reqPath, item.name),
         isDir: item.is_dir,
         size: item.size
       }));
-    } catch (error: any) {
+    } catch (error) {
       console.error('OpenList listDir error:', error);
       throw error;
     }
   }
 
-  async getFileStream(_path: string): Promise<Readable> {
+  async getFileStream(filePath: string): Promise<Readable> {
+    void filePath;
     throw new Error('Method not implemented.');
   }
 
   async rename(oldPath: string, newPath: string): Promise<boolean> {
     if (!this.baseUrl) return false;
     try {
-      const response = await this.api.post(`${this.baseUrl}/api/fs/rename`, {
+      const response = await this.api.post<OpenListResponse>(`${this.baseUrl}/api/fs/rename`, {
         path: oldPath,
         name: path.posix.basename(newPath)
       }, {
         headers: { 'Authorization': this.token }
       });
       return response.data.code === 200;
-    } catch (e) {
-      console.error('OpenList rename error:', e);
+    } catch (error) {
+      console.error('OpenList rename error:', error);
       return false;
     }
   }
 
   async batchRename(
     srcDir: string,
-    renameObjects: Array<{ src_name: string, new_name: string }>,
+    renameObjects: BatchRenameItem[],
     batchSize: number = 20,
     onProgress?: (current: number, total: number) => void
   ): Promise<boolean> {
@@ -153,10 +156,10 @@ export class OpenListSource implements IMediaSource {
 
   private async executeSingleBatchRename(
     srcDir: string,
-    renameObjects: Array<{ src_name: string, new_name: string }>
+    renameObjects: BatchRenameItem[]
   ): Promise<boolean> {
     try {
-      const response = await this.api.post(`${this.baseUrl}/api/fs/batch_rename`, {
+      const response = await this.api.post<OpenListResponse>(`${this.baseUrl}/api/fs/batch_rename`, {
         src_dir: srcDir,
         rename_objects: renameObjects
       }, {
@@ -168,8 +171,13 @@ export class OpenListSource implements IMediaSource {
         return false;
       }
       return true;
-    } catch (e: any) {
-      console.error('OpenList batchRename error:', e.response?.data || e.message);
+    } catch (error) {
+      console.error(
+        'OpenList batchRename error:',
+        getNestedErrorMessage(error, (value) =>
+          typeof value.response?.data === 'string' ? value.response.data : undefined,
+        ),
+      );
       return false;
     }
   }
@@ -184,7 +192,7 @@ export class OpenListSource implements IMediaSource {
 
       // AList /api/fs/put can accept path as a query parameter or a header.
       // Moving it to query parameters is the most robust way to handle Unicode/Chinese characters.
-      const response = await this.api.put(`${this.baseUrl}/api/fs/put`, data, {
+      const response = await this.api.put<OpenListResponse>(`${this.baseUrl}/api/fs/put`, data, {
         params: {
           path: filePath
         },
@@ -201,9 +209,13 @@ export class OpenListSource implements IMediaSource {
         console.error('OpenList writeFile failed:', response.data.code, response.data.message);
       }
       return success;
-    } catch (e: any) {
-      const errorData = e.response?.data;
-      console.error('OpenList writeFile error:', errorData || e.message);
+    } catch (error) {
+      console.error(
+        'OpenList writeFile error:',
+        getNestedErrorMessage(error, (value) =>
+          typeof value.response?.data === 'string' ? value.response.data : undefined,
+        ),
+      );
       return false;
     }
   }

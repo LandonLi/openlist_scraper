@@ -1,6 +1,7 @@
 import { create } from 'zustand';
+import type { LogType, SourceType } from '../../shared/types';
 
-export type LogType = 'info' | 'success' | 'error' | 'warn' | 'debug';
+export type { LogType };
 
 export interface ScrapedMediaRecord {
   id?: number;
@@ -19,19 +20,31 @@ export interface ScrapedMediaRecord {
   scraped_at: string;
 }
 
+interface AppConfigState {
+  tmdbKey: string;
+  openaiKey: string;
+  openaiBaseUrl: string;
+  openaiModel: string;
+  proxyUrl: string;
+  sourceType: SourceType;
+  localPath: string;
+  openListUrl: string;
+  openListToken: string;
+}
+
 interface AppState {
   // Config
   tmdbKey: string;
   openaiKey: string;
   openaiBaseUrl: string;
   openaiModel: string;
-  proxyUrl: string; // Added
+  proxyUrl: string;
 
   // Source Config
-  sourceType: 'local' | 'openlist';
+  sourceType: SourceType;
   localPath: string;
   openListUrl: string;
-  openListToken: string; // Changed from User/Pass
+  openListToken: string;
 
   // Scanner
   isScanning: boolean;
@@ -44,8 +57,8 @@ interface AppState {
   media: ScrapedMediaRecord[];
 
   // Actions
-  setConfig: (key: string, value: string) => void;
-  setVideoExtensions: (exts: string) => void; // Added
+  setConfig: <K extends keyof AppConfigState>(key: K, value: AppConfigState[K]) => void;
+  setVideoExtensions: (exts: string) => void;
   addLog: (message: string, type: LogType) => void;
   clearLogs: () => void;
   setScanning: (status: boolean) => void;
@@ -69,7 +82,11 @@ export const useAppStore = create<AppState>((set) => ({
   logs: [],
   media: [],
 
-  setConfig: (key, value) => set((state) => ({ ...state, [key]: value })),
+  setConfig: (key, value) =>
+    set((state) => ({
+      ...state,
+      [key]: value,
+    })),
   setVideoExtensions: (videoExtensions) => set({ videoExtensions }),
   addLog: (message, type) => set((state) => ({
     logs: [...state.logs, { message, type, timestamp: Date.now() }].slice(-100) // Keep last 100

@@ -1,7 +1,29 @@
-import { useEffect, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useState, type CSSProperties, type ReactNode } from 'react';
 import { useAppStore, LogType, ScrapedMediaRecord } from './stores/appStore';
 import { Settings, Database, Globe, Play, Eye, EyeOff, CheckCircle2, AlertCircle, RefreshCw, Save, ArrowRight, Minus, Square, X, Folder, Network, Zap, File, Clapperboard, ChevronUp, ChevronDown, LayoutGrid, List, Wand2, Sun, Moon, ArrowLeft, CornerLeftUp, Check, Calendar, Clock, Trash2, Download, Sparkles } from 'lucide-react';
 import clsx from 'clsx';
+import type {
+  ScannerRequireConfirmationPayload,
+} from '../shared/ipc';
+import type {
+  BatchOptions,
+  EpisodeConfirmationPayload,
+  EpisodeDetailState,
+  EpisodeMatchItem,
+  FileItem,
+  LogLevel,
+  MetadataProgressPayload,
+  RuleDefinition,
+  ScannerLogPayload,
+  ScannerOperationProgressPayload,
+  SearchResult,
+  ThemeMode,
+  UpdateDownloadedPayload,
+  UpdateDownloadProgressPayload,
+  ViewMode,
+} from '../shared/types';
+
+type StatusResult = { success: boolean; message: string };
 
 type UpdateInfoState = {
   currentVersion: string;
@@ -9,7 +31,25 @@ type UpdateInfoState = {
   releaseNote: string;
 };
 
-const StatusMessage = ({ result }: { result: { success: boolean; message: string } | null }) => {
+type WizardState = {
+  detectedName?: string;
+  seriesResults?: SearchResult[];
+  seriesName?: string;
+  seriesId?: string;
+  matches?: EpisodeMatchItem[];
+};
+
+const dragRegionStyle: CSSProperties & { WebkitAppRegion: 'drag' } = { WebkitAppRegion: 'drag' };
+const noDragRegionStyle: CSSProperties & { WebkitAppRegion: 'no-drag' } = { WebkitAppRegion: 'no-drag' };
+const defaultBatchOptions: BatchOptions = { rename: true, writeNfo: true, writePoster: true, writeStill: true };
+const batchOptionDefinitions: Array<{ id: keyof BatchOptions; label: string }> = [
+  { id: 'rename', label: '重命名' },
+  { id: 'writeNfo', label: '生成 NFO' },
+  { id: 'writePoster', label: '下载海报' },
+  { id: 'writeStill', label: '下载剧照' },
+];
+
+const StatusMessage = ({ result }: { result: StatusResult | null }) => {
   if (!result) return null;
   return (
     <div className={clsx("text-[11px] font-medium flex items-center gap-1.5 animate-in fade-in slide-in-from-left-1", result.success ? "text-green-500" : "text-red-500")}>
@@ -70,6 +110,12 @@ const formatRelativeScrapedAt = (value?: string) => {
 const basename = (input: string) => {
   const normalized = input.replace(/\\/g, '/');
   return normalized.split('/').filter(Boolean).pop() || input;
+};
+
+const getErrorMessage = (error: unknown, fallback = '未知错误') => {
+  if (error instanceof Error && error.message) return error.message;
+  if (typeof error === 'string' && error) return error;
+  return fallback;
 };
 
 const LogItem = ({ log }: { log: { message: string, type: LogType, timestamp: number } }) => {
@@ -247,7 +293,7 @@ export default function App() {
 
   // Explorer
   const [currentPath, setCurrentPath] = useState('');
-  const [fileList, setFileList] = useState<Array<{ name: string, path: string, isDir: boolean, size: number }>>([]);
+  const [fileList, setFileList] = useState<FileItem[]>([]);
   const [loadingFiles, setLoadingFiles] = useState(false);
   const [navHistory, setNavHistory] = useState<string[]>([]);
 
@@ -260,32 +306,26 @@ export default function App() {
   const [showOpenaiKey, setShowOpenaiKey] = useState(false);
   const [showOpenListToken, setShowOpenListToken] = useState(false);
   const [saveStatus, setSaveStatus] = useState<'idle' | 'saving' | 'saved'>('idle');
-  const [rules, setRules] = useState<Array<{ id: string, pattern: string, type: string }>>([]);
+  const [rules, setRules] = useState<RuleDefinition[]>([]);
 
   const [isTestingLLM, setIsTestingLLM] = useState(false);
-  const [llmTestResult, setLlmTestResult] = useState<{ success: boolean; message: string } | null>(null);
+  const [llmTestResult, setLlmTestResult] = useState<StatusResult | null>(null);
   const [availableModels, setAvailableModels] = useState<string[]>([]);
   const [isTestingTmdb, setIsTestingTmdb] = useState(false);
-  const [tmdbTestResult, setTmdbTestResult] = useState<{ success: boolean; message: string } | null>(null);
+  const [tmdbTestResult, setTmdbTestResult] = useState<StatusResult | null>(null);
   const [isTestingProxy, setIsTestingProxy] = useState(false);
-  const [proxyTestResult, setProxyTestResult] = useState<{ success: boolean; message: string } | null>(null);
+  const [proxyTestResult, setProxyTestResult] = useState<StatusResult | null>(null);
   const [isTestingOpenList, setIsTestingOpenList] = useState(false);
-  const [openListTestResult, setOpenListTestResult] = useState<{ success: boolean; message: string } | null>(null);
+  const [openListTestResult, setOpenListTestResult] = useState<StatusResult | null>(null);
 
   // Wizard
   const [wizardStage, setWizardWizardStage] = useState<'idle' | 'series' | 'loading_episodes' | 'episodes' | 'executing' | 'finished'>('idle');
-  const [wizardData, setWizardData] = useState<{
-    detectedName?: string,
-    seriesResults?: any[],
-    seriesName?: string,
-    seriesId?: string,  // TMDB ID
-    matches?: any[]
-  }>({});
+  const [wizardData, setWizardData] = useState<WizardState>({});
   const [scrapeProgress, setScrapeProgress] = useState<{ percent: number, message: string }>({ percent: 0, message: '' });
   const [selectedIndices, setSelectedIndices] = useState<number[]>([]);
-  const [batchOptions, setBatchOptions] = useState({ rename: true, writeNfo: true, writePoster: true, writeStill: true });
+  const [batchOptions, setBatchOptions] = useState<BatchOptions>(defaultBatchOptions);
 
-  const [selectedEpisodeDetail, setSelectedEpisodeDetail] = useState<any | null>(null);
+  const [selectedEpisodeDetail, setSelectedEpisodeDetail] = useState<EpisodeDetailState | null>(null);
   const [, setLoadingDetail] = useState(false);
   const [editingMatchIndex, setEditingMatchIndex] = useState<number | null>(null);
   const [editMatchValues, setEditMatchValues] = useState({ season: 1, episode: 1 });
@@ -314,12 +354,12 @@ export default function App() {
   const [videoExtsInput, setVideoExtsInput] = useState('');
 
   // General Settings
-  const [theme, setTheme] = useState<'dark' | 'light'>('dark');
-  const [logLevel, setLogLevel] = useState<'info' | 'warn' | 'error'>('info');
+  const [theme, setTheme] = useState<ThemeMode>('dark');
+  const [logLevel, setLogLevel] = useState<LogLevel>('info');
 
   // UI State
   const [activeUtilityPanel, setActiveUtilityPanel] = useState<'history' | 'logs' | null>(null);
-  const [viewMode, setViewMode] = useState<'grid' | 'list'>('list');
+  const [viewMode, setViewMode] = useState<ViewMode>('list');
 
   // Update State
   const [appVersion, setAppVersion] = useState('');
@@ -330,6 +370,20 @@ export default function App() {
   const [downloadProgress, setDownloadProgress] = useState(0);
   const [isUpdateReady, setIsUpdateReady] = useState(false);
   const [isRefreshingHistory, setIsRefreshingHistory] = useState(false);
+
+  const refreshMedia = useCallback(async (options?: { silent?: boolean }) => {
+    setIsRefreshingHistory(true);
+    try {
+      const allMedia = await window.ipcRenderer.invoke('media:getAll');
+      setMedia(Array.isArray(allMedia) ? allMedia : []);
+    } catch (error) {
+      if (!options?.silent) {
+        addLog(`刷新历史记录失败: ${getErrorMessage(error)}`, 'error');
+      }
+    } finally {
+      setIsRefreshingHistory(false);
+    }
+  }, [addLog, setMedia]);
 
   // Initial Configuration Loading
   useEffect(() => {
@@ -382,13 +436,13 @@ export default function App() {
       }
     };
 
-    const handleLog = (data: any) => addLog(data.message, data.type);
+    const handleLog = (data: ScannerLogPayload) => addLog(data.message, data.type);
     const handleFinished = () => {
       setScanning(false);
       addLog('扫描任务全部完成。', 'success');
       refreshMedia();
     };
-    const handleConfirmation = (data: any) => {
+    const handleConfirmation = (data: ScannerRequireConfirmationPayload) => {
       setMetadataFetched(false);
       setFetchingMetadata(false);
       setMetadataProgress({ current: 0, total: 0 });
@@ -396,29 +450,29 @@ export default function App() {
       setManualSeriesName(data.detectedName); // Initialize with detected name
       setWizardWizardStage('series');
     };
-    const handleEpisodesConfirmation = (data: any) => {
+    const handleEpisodesConfirmation = (data: EpisodeConfirmationPayload) => {
       setMetadataFetched(false);
       setFetchingMetadata(false);
       setMetadataProgress({ current: 0, total: 0 });
       setWizardData(prev => ({
         ...prev,
         seriesName: data.seriesName,
-        seriesId: data.seriesId || (data.matches && data.matches[0]?.tmdbId),
+        seriesId: data.matches[0]?.tmdbId,
         matches: data.matches
       }));
-      setSelectedIndices(data.matches.map((_: any, i: number) => i));
+      setSelectedIndices(data.matches.map((_, i) => i));
       setWizardWizardStage('episodes');
     };
-    const handleProgress = (data: any) => {
+    const handleProgress = (data: ScannerOperationProgressPayload) => {
       setScrapeProgress({ percent: data.percent, message: data.message });
       if (data.finished) setWizardWizardStage('finished');
     };
 
-    const handleDownloadProgress = (data: any) => {
+    const handleDownloadProgress = (data: UpdateDownloadProgressPayload) => {
       setDownloadProgress(Number(data.percent));
     };
 
-    const handleUpdateDownloaded = (data: any) => {
+    const handleUpdateDownloaded = (data: UpdateDownloadedPayload) => {
       setIsDownloadingUpdate(false);
       setIsUpdateReady(true);
       setDownloadProgress(100);
@@ -451,21 +505,16 @@ export default function App() {
 
     loadConfig();
     return () => {
-      if (typeof cleanupLog === 'function') (cleanupLog as any)();
-      if (typeof cleanupFinished === 'function') (cleanupFinished as any)();
-      if (typeof cleanupConf === 'function') (cleanupConf as any)();
-      if (typeof cleanupEpConf === 'function') (cleanupEpConf as any)();
-      if (typeof cleanupProgress === 'function') (cleanupProgress as any)();
-      if (typeof cleanupDlProgress === 'function') (cleanupDlProgress as any)();
-      if (typeof cleanupDownloaded === 'function') (cleanupDownloaded as any)();
+      [cleanupLog, cleanupFinished, cleanupConf, cleanupEpConf, cleanupProgress, cleanupDlProgress, cleanupDownloaded]
+        .forEach((cleanup) => cleanup());
     };
-  }, []);
+  }, [addLog, refreshMedia, setConfig, setScanning, setVideoExtensions]);
 
   // 监听元数据获取进度
   useEffect(() => {
     if (!window.ipcRenderer) return;
 
-    const handleProgress = (_: any, progress: { current: number; total: number }) => {
+    const handleProgress = (progress: MetadataProgressPayload) => {
       console.log('[前端] 收到进度更新:', progress);
       setMetadataProgress(progress);
     };
@@ -492,7 +541,7 @@ export default function App() {
   // Handlers
   const handleConfirmSeries = (seriesId: string | null) => {
     // 找到用户选择的剧集对象,提取剧集名称
-    const selected = seriesId ? wizardData.seriesResults?.find((r: any) => r.id === seriesId) : null;
+    const selected = seriesId ? wizardData.seriesResults?.find((result) => result.id === seriesId) : null;
 
     window.ipcRenderer.send('scanner-confirm-response', {
       seriesId,
@@ -519,7 +568,7 @@ export default function App() {
 
   const handleConfirmEpisodes = (confirmed: boolean) => {
     if (!confirmed) {
-      window.ipcRenderer.send('scanner-episodes-confirm-response', { confirmed: false, options: {}, selectedIndices: [] });
+      window.ipcRenderer.send('scanner-episodes-confirm-response', { confirmed: false, selectedIndices: [] });
       setWizardWizardStage('idle'); setWizardData({});
     } else {
       setWizardWizardStage('executing');
@@ -533,7 +582,7 @@ export default function App() {
       window.ipcRenderer.send('scanner-confirm-response', { seriesId: null });
     }
     if (wizardStage === 'episodes') {
-      window.ipcRenderer.send('scanner-episodes-confirm-response', { confirmed: false, options: {}, selectedIndices: [] });
+      window.ipcRenderer.send('scanner-episodes-confirm-response', { confirmed: false, selectedIndices: [] });
     }
 
     setWizardWizardStage('idle');
@@ -563,8 +612,10 @@ export default function App() {
     setEditingMatchIndex(null);
 
     try {
+      const showId = item.tmdbId;
+      if (!showId) return;
       const metadata = await window.ipcRenderer.invoke('metadata:getEpisodeDetail', {
-        showId: item.tmdbId,
+        showId,
         season: editMatchValues.season,
         episode: editMatchValues.episode
       });
@@ -576,8 +627,8 @@ export default function App() {
         };
         setWizardData(prev => ({ ...prev, matches: updatedMatchesWithMeta }));
       }
-    } catch (e) {
-      console.error('Failed to fetch metadata for manual match:', e);
+    } catch (error) {
+      console.error('Failed to fetch metadata for manual match:', error);
     }
   };
 
@@ -658,7 +709,7 @@ export default function App() {
     setTimeout(() => handleFetchMetadataWithData(newMatches, wizardData.seriesId!), 100);
   };
 
-  const handleFetchMetadataWithData = async (matches: any[], seriesId: string) => {
+  const handleFetchMetadataWithData = async (matches: EpisodeMatchItem[], seriesId: string) => {
     if (!matches || !seriesId || fetchingMetadata) return;
 
     setFetchingMetadata(true);
@@ -710,14 +761,14 @@ export default function App() {
 
   const handleSmartIdentify = async () => {
     if (!wizardData.matches || smartIdentifying) return;
-    const unmatched = wizardData.matches.filter((item: any) => !item.match.success || item.match.source === 'unmatched');
+    const unmatched = wizardData.matches.filter((item) => !item.match.success || item.match.source === 'unmatched');
     if (unmatched.length === 0) return;
     setSmartIdentifying(true);
     try {
       const result = await window.ipcRenderer.invoke('scanner:smart-identify', { unmatchedFiles: unmatched });
       if (result.success) {
-        const newMatches = wizardData.matches.map((item: any) => {
-          const smartResult = result.results.find((r: any) => r.file.path === item.file.path);
+        const newMatches = wizardData.matches.map((item) => {
+          const smartResult = result.results.find((matchedItem) => matchedItem.file.path === item.file.path);
           return smartResult || item;
         });
         setWizardData(prev => ({ ...prev, matches: newMatches }));
@@ -764,7 +815,7 @@ export default function App() {
     return relativePath ? relativePath.split(/[\\/]/).filter(Boolean) : [];
   };
 
-  const loadDirectory = async (path: string, options?: { isBack?: boolean }) => {
+  const loadDirectory = useCallback(async (path: string, options?: { isBack?: boolean }) => {
     setLoadingFiles(true);
     setFileList([]);
     setSelectedPaths(new Set());
@@ -778,7 +829,7 @@ export default function App() {
     if (result.success) { setFileList(result.data); setCurrentPath(result.currentPath); }
     else { addLog(`无法加载目录: ${result.error}`, 'error'); }
     setLoadingFiles(false);
-  };
+  }, [addLog, currentPath, localPath, openListToken, openListUrl, sourceType]);
 
   const handleSourceTypeChange = (nextType: 'local' | 'openlist') => {
     if (nextType === sourceType) return;
@@ -874,13 +925,13 @@ export default function App() {
   };
 
   const handleAddRule = () => {
-    const newRule = { id: `rule_${Date.now()}`, pattern: '', type: 'tv' };
+    const newRule: RuleDefinition = { id: `rule_${Date.now()}`, pattern: '', type: 'tv' };
     setRules([...rules, newRule]);
   };
 
-  const handleUpdateRule = (idx: number, field: string, value: string) => {
+  const handleUpdateRule = (idx: number, field: keyof RuleDefinition, value: string) => {
     const newRules = [...rules];
-    (newRules[idx] as any)[field] = value;
+    newRules[idx] = { ...newRules[idx], [field]: value };
     setRules(newRules);
   };
 
@@ -920,21 +971,30 @@ export default function App() {
     setIsTestingOpenList(false);
   };
 
-  const handleShowEpisodeDetail = async (item: any) => {
-    if (!item.metadata || !item.tmdbId) return;
+  const handleShowEpisodeDetail = async (item: EpisodeMatchItem) => {
+    const showId = item.tmdbId;
+    if (!item.metadata || !showId) return;
     setLoadingDetail(true);
     setSelectedEpisodeDetail({ ...item.metadata, season: item.match.season, episode: item.match.episode });
     try {
-      const fullData = await window.ipcRenderer.invoke('metadata:getEpisodeDetail', { showId: item.tmdbId, season: item.match.season, episode: item.match.episode });
+      const fullData = await window.ipcRenderer.invoke('metadata:getEpisodeDetail', {
+        showId,
+        season: item.match.season ?? 1,
+        episode: item.match.episode ?? 1,
+      });
       if (fullData) {
         setSelectedEpisodeDetail({
           ...fullData,
           season: item.match.season,
           episode: item.match.episode,
-          overview: fullData.overview || item.metadata.overview || item.match.overview // Fallback to existing overview
+          overview: fullData.overview || item.metadata.overview
         });
       }
-    } catch (e) { console.error(e); } finally { setLoadingDetail(false); }
+    } catch (error) {
+      console.error(error);
+    } finally {
+      setLoadingDetail(false);
+    }
   };
 
   const toggleSelection = (path: string, index: number, event?: { ctrlKey: boolean; shiftKey: boolean }) => {
@@ -994,19 +1054,6 @@ export default function App() {
     else setSelectedIndices([...selectedIndices, idx]);
   };
 
-  const refreshMedia = async (options?: { silent?: boolean }) => {
-    setIsRefreshingHistory(true);
-    try {
-      const allMedia = await window.ipcRenderer.invoke('media:getAll');
-      setMedia(Array.isArray(allMedia) ? allMedia : []);
-    } catch (e: any) {
-      if (!options?.silent) {
-        addLog(`刷新历史记录失败: ${e.message}`, 'error');
-      }
-    } finally {
-      setIsRefreshingHistory(false);
-    }
-  };
   const openUtilityPanel = async (panel: 'history' | 'logs') => {
     setActiveUtilityPanel(panel);
     if (panel === 'history') {
@@ -1015,7 +1062,7 @@ export default function App() {
   };
   const isConfigured = (sourceType === 'local' && localPath) || (sourceType === 'openlist' && openListUrl);
 
-  const runUpdateCheck = async (options?: { silent?: boolean }) => {
+  const runUpdateCheck = useCallback(async (options?: { silent?: boolean }) => {
     if (isCheckingUpdate) return;
 
     const silent = options?.silent ?? false;
@@ -1043,14 +1090,14 @@ export default function App() {
           addLog('当前已是最新版本', 'success');
         }
       }
-    } catch (e: any) {
+    } catch (error) {
       if (!silent) {
-        addLog(`检查更新出错: ${e.message}`, 'error');
+        addLog(`检查更新出错: ${getErrorMessage(error)}`, 'error');
       }
     } finally {
       setIsCheckingUpdate(false);
     }
-  };
+  }, [addLog, isCheckingUpdate]);
 
   const handleCheckUpdate = async () => {
     await runUpdateCheck();
@@ -1077,8 +1124,8 @@ export default function App() {
       } else {
         addLog(`下载更新失败: ${result?.error || '未知错误'}`, 'error');
       }
-    } catch (e: any) {
-      addLog(`更新失败: ${e.message}`, 'error');
+    } catch (error) {
+      addLog(`更新失败: ${getErrorMessage(error)}`, 'error');
     } finally {
       setIsDownloadingUpdate(false);
     }
@@ -1092,7 +1139,7 @@ export default function App() {
     }, 2500);
 
     return () => window.clearTimeout(timer);
-  }, [appVersion]);
+  }, [appVersion, runUpdateCheck]);
 
   useEffect(() => {
     if (activeTab === 'dashboard' && !isScanning) {
@@ -1103,7 +1150,7 @@ export default function App() {
         loadDirectory(nextPath);
       }
     }
-  }, [activeTab, sourceType, localPath, openListUrl, isScanning]);
+  }, [activeTab, currentPath, isScanning, loadDirectory, localPath, openListUrl, sourceType]);
 
   useEffect(() => {
     if (activeTab !== 'dashboard' && activeUtilityPanel) {
@@ -1114,7 +1161,7 @@ export default function App() {
   return (
     <div className="flex h-screen bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-slate-100 overflow-hidden">
       {/* Title Bar */}
-      <div className="fixed top-0 left-0 right-0 h-8 z-[100] flex items-center justify-between bg-white dark:bg-slate-900 border-b border-slate-200 dark:border-slate-800 select-none" style={{ WebkitAppRegion: 'drag' } as any}>
+      <div className="fixed top-0 left-0 right-0 h-8 z-[100] flex items-center justify-between bg-white dark:bg-slate-900 border-b border-slate-200 dark:border-slate-800 select-none" style={dragRegionStyle}>
         <div className="px-3 flex items-center gap-2 text-[11px] font-bold text-slate-500 tracking-wider uppercase">
           <img
             src="./app-icon.png"
@@ -1127,14 +1174,14 @@ export default function App() {
             onClick={handleCheckUpdate}
             disabled={isCheckingUpdate}
             className="ml-1 px-1.5 py-0.5 rounded bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-[9px] font-black text-slate-400 dark:text-slate-500 tracking-normal transition-colors cursor-pointer disabled:opacity-50"
-            style={{ WebkitAppRegion: 'no-drag' } as any}
+            style={noDragRegionStyle}
             title="点击检查更新"
           >
             {isCheckingUpdate ? "Checking..." : (appVersion ? `V${appVersion}` : '...')}
           </button>
         </div>
 
-        <div className="flex h-full items-center" style={{ WebkitAppRegion: 'no-drag' } as any}>
+        <div className="flex h-full items-center" style={noDragRegionStyle}>
           <button
             onClick={() => setActiveTab(activeTab === 'settings' ? 'dashboard' : 'settings')}
             className={clsx(
@@ -1586,7 +1633,7 @@ export default function App() {
                       </div>
                       <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-4 flex items-center justify-between">
                         <span className="text-sm font-bold">日志级别</span>
-                        <select value={logLevel} onChange={(e) => setLogLevel(e.target.value as any)} className="bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg px-2 py-1 text-xs outline-none font-bold">
+                        <select value={logLevel} onChange={(e) => setLogLevel(e.target.value as LogLevel)} className="bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg px-2 py-1 text-xs outline-none font-bold">
                           <option value="debug">Debug (调试)</option>
                           <option value="info">Info (信息)</option>
                           <option value="warn">Warning (警告)</option>
@@ -1793,7 +1840,7 @@ export default function App() {
                 )}
                 {wizardData.seriesResults !== undefined && wizardData.seriesResults.length === 0 && <div className="text-center py-10 text-slate-400">未找到相关结果，请尝试其他关键词。</div>}
 
-                {wizardData.seriesResults && wizardData.seriesResults.map((item: any) => (
+                {wizardData.seriesResults && wizardData.seriesResults.map((item) => (
                   <div key={item.id} onClick={() => handleConfirmSeries(item.id)} className="flex gap-4 p-3 rounded-xl border hover:border-blue-500 cursor-pointer transition-all">
                     {item.poster ? <img src={item.poster} className="w-20 h-28 object-cover rounded-md" alt="" /> : <div className="w-20 h-28 bg-slate-100 rounded-md flex items-center justify-center"><File className="w-8 h-8 text-slate-400" /></div>}
                     <div className="flex-1 min-w-0"><h4 className="font-bold text-lg truncate">{item.title} ({item.year || 'N/A'})</h4><p className="text-xs text-slate-500 line-clamp-3 mt-1">{item.overview}</p></div>
@@ -1807,9 +1854,9 @@ export default function App() {
               <>
                 <div className="px-6 py-4 bg-slate-50 border-b border-slate-200">
                   <div className="flex flex-wrap gap-4">
-                    {[{ id: 'rename', label: '重命名' }, { id: 'writeNfo', label: '生成 NFO' }, { id: 'writePoster', label: '下载海报' }, { id: 'writeStill', label: '下载剧照' }].map(opt => (
+                    {batchOptionDefinitions.map((opt) => (
                       <label key={opt.id} className="flex items-center gap-2 cursor-pointer">
-                        <input type="checkbox" checked={(batchOptions as any)[opt.id]} onChange={() => toggleOption(opt.id as any)} className="w-4 h-4 rounded text-blue-600" />
+                        <input type="checkbox" checked={batchOptions[opt.id]} onChange={() => toggleOption(opt.id)} className="w-4 h-4 rounded text-blue-600" />
                         <span className="text-xs font-bold">{opt.label}</span>
                       </label>
                     ))}
@@ -1850,7 +1897,7 @@ export default function App() {
                   </div>
                 )}
                 {/* Smart Identify Button */}
-                {wizardData.matches && wizardData.matches.some((item: any) => !item.match.success || item.match.source === 'unmatched') && (
+                {wizardData.matches && wizardData.matches.some((item) => !item.match.success || item.match.source === 'unmatched') && (
                   <div className="px-6 py-3 bg-amber-50 dark:bg-amber-900/10 border-b border-amber-200 dark:border-amber-900/30">
                     <button
                       onClick={handleSmartIdentify}
@@ -1870,12 +1917,12 @@ export default function App() {
                       )}
                     </button>
                     <p className="text-xs text-slate-400 mt-2">
-                      使用 AI 识别正则匹配失败的文件（共 {wizardData.matches.filter((item: any) => !item.match.success || item.match.source === 'unmatched').length} 个）
+                      使用 AI 识别正则匹配失败的文件（共 {wizardData.matches.filter((item) => !item.match.success || item.match.source === 'unmatched').length} 个）
                     </p>
                   </div>
                 )}
                 {/* Fetch Metadata Button */}
-                {!metadataFetched && !fetchingMetadata && wizardData.matches && wizardData.matches.some((item: any) => !item.metadata) && (
+                {!metadataFetched && !fetchingMetadata && wizardData.matches && wizardData.matches.some((item) => !item.metadata) && (
                   <div className="px-6 py-3 bg-blue-50 dark:bg-blue-900/10 border-b border-blue-200 dark:border-blue-900/30">
                     <button
                       onClick={handleFetchMetadata}
@@ -1918,7 +1965,7 @@ export default function App() {
                   <table className="w-full text-left border-collapse">
                     <thead className="sticky top-0 bg-white border-b border-slate-200 text-[10px] font-bold text-slate-400 uppercase"><tr><th className="px-6 py-3 w-12"><input type="checkbox" checked={selectedIndices.length === wizardData.matches?.length} onChange={toggleSelectIndicesAll} /></th><th>预览</th><th className="w-24">识别结果</th><th>元数据</th></tr></thead>
                     <tbody className="divide-y divide-slate-200">
-                      {wizardData.matches?.map((item: any, idx: number) => {
+                      {wizardData.matches?.map((item, idx) => {
                         const fileExt = item.file.name.substring(item.file.name.lastIndexOf('.'));
                         // 根据总集数自动计算需要的位数（最少2位）
                         const episodeDigits = Math.max(2, String(item.match.totalEpisodes || 0).length);

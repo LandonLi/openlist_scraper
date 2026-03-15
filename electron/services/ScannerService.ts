@@ -1,12 +1,31 @@
-import { IMediaSource } from '../interfaces/IMediaSource';
+import { IMediaSource, type BatchRenameItem, type FileItem } from '../interfaces/IMediaSource';
 import { RegexEngine } from '../matchers/RegexEngine';
 import { LLMEngine } from '../matchers/LLMEngine';
-import { IMetadataProvider } from '../interfaces/IMetadataProvider';
+import { IMetadataProvider, type EpisodeData, type SearchResult } from '../interfaces/IMetadataProvider';
 import { DatabaseService } from './DatabaseService';
 import { BrowserWindow, ipcMain } from 'electron';
 import path from 'path';
-import fetch from 'node-fetch';
+import fetch, { type RequestInit } from 'node-fetch';
 import { HttpsProxyAgent } from 'https-proxy-agent';
+import type {
+  ScannerConfirmResponsePayload,
+  ScannerEpisodesConfirmResponsePayload,
+} from '../../shared/ipc';
+import type {
+  BatchOptions,
+  EpisodeConfirmationPayload,
+  EpisodeMatchItem,
+  LogLevel,
+} from '../../shared/types';
+import { getErrorMessage } from '../utils/errors';
+
+type CachedSeriesInfo = { id: string; poster?: string };
+type UserConfirmationResult = {
+  id: string;
+  poster?: string;
+  newName?: string;
+  confirmedName?: string;
+};
 
 export class ScannerService {
   private regexEngine: RegexEngine;
@@ -16,10 +35,10 @@ export class ScannerService {
   private mainWindow: BrowserWindow | null = null;
   private _isScanning: boolean = false;
 
-  private showMetadataCache: Map<string, { id: string, poster?: string }> = new Map();
-  private logLevel: 'info' | 'warn' | 'error' | 'debug' = 'info';
-  private proxyUrl: string = '';
-  private openListBatchSize: number = 20;
+  private showMetadataCache: Map<string, CachedSeriesInfo> = new Map();
+  private logLevel: LogLevel = 'info';
+  private proxyUrl = '';
+  private openListBatchSize = 20;
 
   constructor(
     regexEngine: RegexEngine,
@@ -43,40 +62,31 @@ export class ScannerService {
 
   setMetadataProvider(provider: IMetadataProvider) {
     this.metadataProvider = provider;
-    if (this.logLevel === 'debug' && typeof (this.metadataProvider as any).setDebugLogger === 'function') {
-      (this.metadataProvider as any).setDebugLogger((msg: string) => this.debug(`[Metadata] ${msg} `));
-    }
+    this.bindDebugLoggers();
   }
 
-  setLogLevel(level: 'info' | 'warn' | 'error' | 'debug') {
+  setLogLevel(level: LogLevel) {
     this.logLevel = level;
-    // Update dependencies if they support logging injection
-    if (this.logLevel === 'debug') {
-      if (typeof (this.metadataProvider as any).setDebugLogger === 'function') {
-        (this.metadataProvider as any).setDebugLogger((msg: string) => this.debug(`[Metadata] ${msg} `));
-      }
-      if (typeof (this.llmEngine as any).setDebugLogger === 'function') {
-        (this.llmEngine as any).setDebugLogger((msg: string) => this.debug(`[LLM] ${msg} `));
-      }
-    } else {
-      // Optional: Clear loggers if we want to stop receiving them, 
-      // but simpler to just filter them out in this.debug()
-    }
+    this.bindDebugLoggers();
   }
 
   setProxy(proxyUrl: string) {
     this.proxyUrl = proxyUrl;
-    // Also update metadata provider if it supports it
-    if (this.metadataProvider && typeof (this.metadataProvider as any).setProxy === 'function') {
-      (this.metadataProvider as any).setProxy(proxyUrl);
-    }
+    this.metadataProvider.setProxy?.(proxyUrl);
   }
 
   setOpenListBatchSize(size: number) {
     this.openListBatchSize = size > 0 ? size : 20;
   }
 
-  private log(message: string, type: 'info' | 'error' | 'success' | 'warn' | 'debug' = 'info') {
+  private bindDebugLoggers() {
+    if (this.logLevel === 'debug') {
+      this.metadataProvider.setDebugLogger?.((msg) => this.debug(`[Metadata] ${msg} `));
+      this.llmEngine.setDebugLogger((msg) => this.debug(`[LLM] ${msg} `));
+    }
+  }
+
+  private log(message: string, type: LogLevel | 'success' = 'info') {
     // Level Priority: debug < info < warn/success < error
     const levels = { debug: 0, info: 1, success: 2, warn: 2, error: 3 };
     const currentLevelScore = levels[this.logLevel] ?? 1;
@@ -88,19 +98,22 @@ export class ScannerService {
     }
   }
 
-  public debug(message: string, data?: any) {
+  public debug(message: string, data?: unknown) {
     if (this.logLevel !== 'debug') return;
     const suffix = data ? `\nData: ${JSON.stringify(data, null, 2)} ` : '';
     this.log(`${message}${suffix} `, 'debug');
   }
 
-  private async requestUserConfirmation(detectedName: string, results: any[]): Promise<{ id: string, poster?: string, newName?: string, confirmedName?: string } | null> {
+  private async requestUserConfirmation(
+    detectedName: string,
+    results: SearchResult[],
+  ): Promise<UserConfirmationResult | null> {
     if (!this.mainWindow) return null;
     return new Promise((resolve) => {
       setTimeout(() => {
         this.mainWindow?.webContents.send('scanner-require-confirmation', { detectedName, results });
       }, 200);
-      ipcMain.once('scanner-confirm-response', (_: any, response: { seriesId: string | null, newName?: string, seriesName?: string }) => {
+      ipcMain.once('scanner-confirm-response', (_event, response: ScannerConfirmResponsePayload) => {
         // If user provided a new name to search
         if (response.newName) {
           resolve({ id: '', newName: response.newName });
@@ -111,17 +124,21 @@ export class ScannerService {
         resolve(selected ? {
           id: selected.id,
           poster: selected.poster,
-          confirmedName: response.seriesName || selected.name // 使用前端传来的名称或从结果中获取
+          confirmedName: response.seriesName || selected.title
         } : null);
       });
     });
   }
 
-  private async requestEpisodesConfirmation(seriesName: string, matches: any[]): Promise<{ confirmed: boolean, options: any, selectedIndices: number[], updatedMatches?: any[] }> {
-    if (!this.mainWindow) return { confirmed: false, options: {}, selectedIndices: [] };
+  private async requestEpisodesConfirmation(
+    seriesName: string,
+    matches: EpisodeMatchItem[],
+  ): Promise<ScannerEpisodesConfirmResponsePayload> {
+    if (!this.mainWindow) return { confirmed: false, selectedIndices: [] };
     return new Promise((resolve) => {
-      this.mainWindow?.webContents.send('scanner-require-episodes-confirmation', { seriesName, matches });
-      ipcMain.once('scanner-episodes-confirm-response', (_: any, response: { confirmed: boolean, options: any, selectedIndices: number[], updatedMatches?: any[] }) => {
+      const payload: EpisodeConfirmationPayload = { seriesName, matches };
+      this.mainWindow?.webContents.send('scanner-require-episodes-confirmation', payload);
+      ipcMain.once('scanner-episodes-confirm-response', (_event, response: ScannerEpisodesConfirmResponsePayload) => {
         resolve(response);
       });
     });
@@ -129,11 +146,11 @@ export class ScannerService {
 
   private async downloadImage(url: string): Promise<Buffer | null> {
     try {
-      const config: any = {};
+      const config: RequestInit = {};
       if (this.proxyUrl) {
         try {
           config.agent = new HttpsProxyAgent(this.proxyUrl);
-        } catch (e) {
+        } catch {
           // ignore invalid proxy
         }
       }
@@ -142,11 +159,13 @@ export class ScannerService {
         return Buffer.from(await response.arrayBuffer());
       }
       return null;
-    } catch (e) { return null; }
+    } catch {
+      return null;
+    }
   }
 
-  private async recursiveList(source: IMediaSource, dirPath: string): Promise<any[]> {
-    let results: any[] = [];
+  private async recursiveList(source: IMediaSource, dirPath: string): Promise<FileItem[]> {
+    let results: FileItem[] = [];
     try {
       const items = await source.listDir(dirPath);
       for (const item of items) {
@@ -156,7 +175,9 @@ export class ScannerService {
           results = results.concat(subItems);
         }
       }
-    } catch (e: any) { this.log(`Error listing dir ${dirPath}: ${e.message} `, 'error'); }
+    } catch (error) {
+      this.log(`Error listing dir ${dirPath}: ${getErrorMessage(error)} `, 'error');
+    }
     return results;
   }
 
@@ -171,7 +192,7 @@ export class ScannerService {
       const allFiles = await source.listDir(dirPath);
 
       const extPattern = videoExtensions.split(',').map(e => e.trim()).filter(e => e).join('|');
-      const videoRegex = new RegExp(`\.(${extPattern})$`, 'i');
+      const videoRegex = new RegExp(`\\.(${extPattern})$`, 'i');
       const videoFiles = allFiles.filter(f => !f.isDir && videoRegex.test(f.name));
 
       this.log(`上下文: 找到 ${videoFiles.length} 个同级视频文件。`);
@@ -188,7 +209,7 @@ export class ScannerService {
       this.log(`LLM 识别成功: ${resolveResult.seriesName} (第 ${resolveResult.season} 季)`, 'success');
 
       // Construct items list similar to scanSource
-      const items: any[] = [];
+      const items: EpisodeMatchItem[] = [];
       for (const file of videoFiles) {
         // Only process the target file
         if (file.name !== pathApi.basename(targetPath)) continue;
@@ -210,15 +231,20 @@ export class ScannerService {
       // Reuse the processing logic
       await this.processSeriesGroup(source, resolveResult.seriesName, items);
 
-    } catch (e: any) {
-      this.log(`识别失败: ${e.message} `, 'error');
+    } catch (error) {
+      this.log(`识别失败: ${getErrorMessage(error)} `, 'error');
     } finally {
       this._isScanning = false;
       this.mainWindow?.webContents.send('scanner-finished');
     }
   }
 
-  private async processSeriesGroup(source: IMediaSource, seriesName: string, items: any[], skipMetadata: boolean = false) {
+  private async processSeriesGroup(
+    source: IMediaSource,
+    seriesName: string,
+    items: EpisodeMatchItem[],
+    skipMetadata = false,
+  ) {
     let seriesInfo = this.showMetadataCache.get(seriesName);
     let currentSearchName = seriesName;
     let confirmedSeriesName = seriesName; // 保存用户确认的剧集名称
@@ -258,10 +284,10 @@ export class ScannerService {
 
     const tmdbId = seriesInfo.id;
 
-    let matchedItems;
+    let matchedItems: EpisodeMatchItem[];
     if (skipMetadata) {
       // 跳过元数据获取，但仍需获取季总集数用于文件名格式
-      const seasonsInGroup = new Set<number>(items.map(i => i.match.season ?? 1));
+      const seasonsInGroup = new Set<number>(items.map((item) => item.match.season ?? 1));
       const seasonEpisodeCounts: Map<number, number> = new Map();
 
       for (const seasonNum of seasonsInGroup) {
@@ -284,8 +310,8 @@ export class ScannerService {
       }));
     } else {
       // 原有逻辑：获取元数据
-      const seasonsInGroup = new Set<number>(items.map(i => i.match.season ?? 1));
-      const seasonCache: Map<number, any[]> = new Map();
+      const seasonsInGroup = new Set<number>(items.map((item) => item.match.season ?? 1));
+      const seasonCache: Map<number, EpisodeData[]> = new Map();
       const seasonEpisodeCounts: Map<number, number> = new Map();  // 保存每季的总集数
 
       for (const seasonNum of seasonsInGroup) {
@@ -300,13 +326,13 @@ export class ScannerService {
         const currentSeason = item.match.season ?? 1;
         const seasonData = seasonCache.get(currentSeason) || [];
         const totalEpisodes = seasonEpisodeCounts.get(currentSeason) || 0;  // 获取总集数
-        let epData = seasonData.find(e => e.episodeNumber === item.match.episode);
+        let epData = seasonData.find((episode) => episode.episodeNumber === item.match.episode);
 
         // Fuzzy Match if needed (though LLM context should have done it)
         if (!epData && seasonData.length > 0) {
           const bestEpisodeNumber = await this.llmEngine.matchEpisodeFromList(item.file.name, seasonData);
           if (bestEpisodeNumber !== null) {
-            epData = seasonData.find(e => e.episodeNumber === bestEpisodeNumber);
+            epData = seasonData.find((episode) => episode.episodeNumber === bestEpisodeNumber);
             if (epData) item.match.episode = bestEpisodeNumber;
           }
         }
@@ -322,14 +348,29 @@ export class ScannerService {
       }
     }
 
-    const { confirmed, options, selectedIndices, updatedMatches } = await this.requestEpisodesConfirmation(confirmedSeriesName, matchedItems);
+    const { confirmed, options, selectedIndices, updatedMatches } =
+      await this.requestEpisodesConfirmation(confirmedSeriesName, matchedItems);
     if (confirmed && selectedIndices.length > 0) {
-      await this.executeBatch(source, confirmedSeriesName, updatedMatches || matchedItems, selectedIndices, options, seriesInfo);
+      await this.executeBatch(
+        source,
+        confirmedSeriesName,
+        updatedMatches || matchedItems,
+        selectedIndices,
+        options ?? { rename: true, writeNfo: true, writePoster: true, writeStill: true },
+        seriesInfo,
+      );
     }
   }
 
-  private async executeBatch(source: IMediaSource, seriesName: string, matchedItems: any[], selectedIndices: number[], options: any, seriesInfo: any) {
-    const renameObjects: any[] = [];
+  private async executeBatch(
+    source: IMediaSource,
+    seriesName: string,
+    matchedItems: EpisodeMatchItem[],
+    selectedIndices: number[],
+    options: BatchOptions,
+    seriesInfo: CachedSeriesInfo,
+  ) {
+    const renameObjects: BatchRenameItem[] = [];
     const itemsToProcess = selectedIndices.map(idx => matchedItems[idx]);
     const totalSteps = itemsToProcess.length * ((options.writeNfo ? 1 : 0) + (options.writeStill ? 1 : 0)) + (options.writePoster ? 1 : 0) + (options.rename ? 1 : 0);
     let currentStep = 0;
@@ -441,7 +482,7 @@ export class ScannerService {
     this.log(`开始扫描 ${selectedPaths.length} 个选定文件...`);
 
     try {
-      const fileItems: any[] = [];
+      const fileItems: FileItem[] = [];
       const pathsByDir = new Map<string, Set<string>>();
       const pathApi = source.type === 'local' ? path : path.posix;
 
@@ -460,7 +501,7 @@ export class ScannerService {
               fileItems.push(item);
             }
           }
-        } catch (e) {
+        } catch {
           this.log(`无法访问目录 ${dir}`, 'warn');
         }
       }
@@ -472,8 +513,8 @@ export class ScannerService {
 
       await this.processFileList(source, fileItems, videoExtensions, true);
 
-    } catch (e: any) {
-      this.log(`扫描失败: ${e.message}`, 'error');
+    } catch (error) {
+      this.log(`扫描失败: ${getErrorMessage(error)}`, 'error');
     } finally {
       this._isScanning = false;
       this.mainWindow?.webContents.send('scanner-finished');
@@ -492,18 +533,26 @@ export class ScannerService {
       this.log('正在遍历目录结构...');
       const allFiles = await this.recursiveList(source, startPath);
       await this.processFileList(source, allFiles, videoExtensions);
-    } catch (error: any) { this.log(`扫描失败: ${error.message}`, 'error'); }
+    } catch (error) {
+      this.log(`扫描失败: ${getErrorMessage(error)}`, 'error');
+    }
     finally { this._isScanning = false; this.log('扫描完成'); this.mainWindow?.webContents.send('scanner-finished'); }
   }
 
-  private async processFileList(source: IMediaSource, allFiles: any[], videoExtensions: string, skipMetadata: boolean = false, skipLLM: boolean = true) {
+  private async processFileList(
+    source: IMediaSource,
+    allFiles: FileItem[],
+    videoExtensions: string,
+    skipMetadata = false,
+    skipLLM = true,
+  ) {
     const extPattern = videoExtensions.split(',').map(e => e.trim()).filter(e => e).join('|');
-    const videoRegex = new RegExp(`\.(${extPattern})$`, 'i');
+    const videoRegex = new RegExp(`\\.(${extPattern})$`, 'i');
     const videoFiles = allFiles.filter(f => !f.isDir && videoRegex.test(f.name));
     this.log(`发现 ${videoFiles.length} 个视频文件。`);
 
-    const groups: Map<string, any[]> = new Map();
-    const dirGroups: Map<string, any[]> = new Map();
+    const groups: Map<string, EpisodeMatchItem[]> = new Map();
+    const dirGroups: Map<string, FileItem[]> = new Map();
 
     // First pass: Group by directory
     for (const file of videoFiles) {
@@ -514,8 +563,8 @@ export class ScannerService {
 
     // Second pass: Process each directory group
     for (const [dir, filesInDir] of dirGroups.entries()) {
-      const dirResults: Array<{ file: any, match: any }> = [];
-      const unmatchedFiles: any[] = [];
+      const dirResults: EpisodeMatchItem[] = [];
+      const unmatchedFiles: FileItem[] = [];
 
       for (const file of filesInDir) {
         const match = await this.regexEngine.match(file.name);
