@@ -11,6 +11,7 @@ type BetterSqliteConstructor = new (
 
 const require = createRequire(import.meta.url);
 const BETTER_SQLITE_NATIVE_ERROR_PATTERNS = [
+  /Cannot find module ['"]bindings['"]/i,
   /Could not locate the bindings file/i,
   /was compiled against a different Node\.js version/i,
   /NODE_MODULE_VERSION/i,
@@ -58,6 +59,51 @@ function loadBetterSqlite(): BetterSqliteConstructor {
       | { default: BetterSqliteConstructor };
 
     return typeof loaded === 'function' ? loaded : loaded.default;
+  } catch (error) {
+    const originalMessage = error instanceof Error ? error.message : String(error);
+
+    if (/Cannot find module ['"]bindings['"]/i.test(originalMessage)) {
+      return loadBetterSqliteWithoutBindings();
+    }
+
+    throw normalizeBetterSqliteError(error);
+  }
+}
+
+function getBetterSqliteNativeBindingPath(): string {
+  const betterSqlitePackagePath = require.resolve('better-sqlite3/package.json');
+  const betterSqliteRoot = path.dirname(betterSqlitePackagePath);
+  const asarUnpackedRoot = betterSqliteRoot.replace(/app\.asar/i, 'app.asar.unpacked');
+  const candidates = [
+    path.join(asarUnpackedRoot, 'build', 'Release', 'better_sqlite3.node'),
+    path.join(betterSqliteRoot, 'build', 'Release', 'better_sqlite3.node'),
+  ];
+
+  for (const candidate of candidates) {
+    if (fs.existsSync(candidate)) {
+      return candidate;
+    }
+  }
+
+  throw new Error([
+    '未找到 better-sqlite3 的原生模块文件。',
+    ...candidates.map((candidate) => `- ${candidate}`),
+  ].join('\n'));
+}
+
+function loadBetterSqliteWithoutBindings(): BetterSqliteConstructor {
+  try {
+    const loaded = require('better-sqlite3/lib/database.js') as BetterSqliteConstructor;
+    const nativeBinding = getBetterSqliteNativeBindingPath();
+
+    return class BetterSqliteWithNativeBinding {
+      constructor(filename: string, options?: Record<string, unknown>) {
+        return new loaded(filename, {
+          ...options,
+          nativeBinding,
+        });
+      }
+    } as unknown as BetterSqliteConstructor;
   } catch (error) {
     throw normalizeBetterSqliteError(error);
   }
