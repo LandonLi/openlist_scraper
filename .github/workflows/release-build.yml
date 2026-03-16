@@ -66,6 +66,7 @@ jobs:
           $blockmapPath = "release/${{ steps.version.outputs.package_version }}/OpenListScraper-Windows-${{ steps.version.outputs.package_version }}-Setup.exe.blockmap"
           $latestYmlPath = "release/${{ steps.version.outputs.package_version }}/latest.yml"
           $unpackedExePath = "release/${{ steps.version.outputs.package_version }}/win-unpacked/OpenListScraper.exe"
+          $appAsarPath = "release/${{ steps.version.outputs.package_version }}/win-unpacked/resources/app.asar"
           $appProcess = $null
 
           function Stop-AppProcess {
@@ -80,10 +81,34 @@ jobs:
           }
 
           try {
-            foreach ($requiredPath in @($installerPath, $blockmapPath, $latestYmlPath, $unpackedExePath)) {
+            foreach ($requiredPath in @($installerPath, $blockmapPath, $latestYmlPath, $unpackedExePath, $appAsarPath)) {
               if (-not (Test-Path $requiredPath)) {
                 throw "Required release artifact not found at $requiredPath."
               }
+            }
+
+            $requiredPackagedEntries = @(
+              'node_modules/better-sqlite3'
+              'node_modules/better-sqlite3/build/Release/better_sqlite3.node'
+              'node_modules/bindings'
+              'node_modules/file-uri-to-path'
+              'node_modules/electron-updater'
+              'node_modules/builder-util-runtime'
+              'node_modules/js-yaml'
+              'node_modules/lazy-val'
+              'node_modules/semver'
+            )
+            $asarEntries = & .\node_modules\.bin\asar.cmd l $appAsarPath |
+              ForEach-Object { $_.TrimStart('\') -replace '\\', '/' }
+            $missingPackagedEntries = @(
+              $requiredPackagedEntries | Where-Object { $_ -notin $asarEntries }
+            )
+
+            if ($missingPackagedEntries.Length -gt 0) {
+              throw @(
+                "Packaged runtime dependencies are missing from $appAsarPath:"
+                $missingPackagedEntries | ForEach-Object { "- $_" }
+              ) -join "`n"
             }
 
             $appProcess = Start-Process -FilePath $unpackedExePath -PassThru
