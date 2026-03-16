@@ -16,6 +16,10 @@ const BETTER_SQLITE_NATIVE_ERROR_PATTERNS = [
   /was compiled against a different Node\.js version/i,
   /NODE_MODULE_VERSION/i,
 ];
+const BETTER_SQLITE_BINDINGS_RECOVERY_PATTERNS = [
+  /Cannot find module ['"]bindings['"]/i,
+  /Could not locate the bindings file/i,
+];
 
 export class NativeDependencyError extends Error {
   constructor(message: string, options?: { cause?: unknown }) {
@@ -70,6 +74,11 @@ function loadBetterSqlite(): BetterSqliteConstructor {
   }
 }
 
+function shouldRetryBetterSqliteWithoutBindings(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error);
+  return BETTER_SQLITE_BINDINGS_RECOVERY_PATTERNS.some((pattern) => pattern.test(message));
+}
+
 function getBetterSqliteNativeBindingPath(): string {
   const betterSqlitePackagePath = require.resolve('better-sqlite3/package.json');
   const betterSqliteRoot = path.dirname(betterSqlitePackagePath);
@@ -109,6 +118,24 @@ function loadBetterSqliteWithoutBindings(): BetterSqliteConstructor {
   }
 }
 
+function openBetterSqliteDatabase(
+  filename: string,
+  options?: Record<string, unknown>,
+): BetterSqliteDatabase {
+  const Database = loadBetterSqlite();
+
+  try {
+    return new Database(filename, options);
+  } catch (error) {
+    if (shouldRetryBetterSqliteWithoutBindings(error)) {
+      const BetterSqliteWithoutBindings = loadBetterSqliteWithoutBindings();
+      return new BetterSqliteWithoutBindings(filename, options);
+    }
+
+    throw normalizeBetterSqliteError(error);
+  }
+}
+
 export interface ScrapedMedia {
   id?: number;
   filePath: string;
@@ -137,15 +164,7 @@ export class DatabaseService {
     // In production, store DB in userData directory
     const dbPath = path.join(app.getPath('userData'), 'media_scraper.db');
     fs.ensureDirSync(path.dirname(dbPath));
-
-    // Delay native module loading so we can surface an actionable recovery step.
-    const Database = loadBetterSqlite();
-
-    try {
-      this.db = new Database(dbPath);
-    } catch (error) {
-      throw normalizeBetterSqliteError(error);
-    }
+    this.db = openBetterSqliteDatabase(dbPath);
 
     this.initSchema();
   }

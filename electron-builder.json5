@@ -3,6 +3,9 @@
   "$schema": "https://raw.githubusercontent.com/electron-userland/electron-builder/master/packages/app-builder-lib/scheme.json",
   "appId": "com.openlist.scraper",
   "asar": true,
+  "asarUnpack": [
+    "node_modules/better-sqlite3/build/Release/*.node"
+  ],
   "productName": "OpenListScraper",
   "compression": "maximum",
   "directories": {
