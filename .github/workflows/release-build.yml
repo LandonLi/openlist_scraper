@@ -106,7 +106,7 @@ jobs:
 
             if ($missingPackagedEntries.Length -gt 0) {
               throw @(
-                "Packaged runtime dependencies are missing from $appAsarPath:"
+                "Packaged runtime dependencies are missing from ${appAsarPath}:"
                 $missingPackagedEntries | ForEach-Object { "- $_" }
               ) -join "`n"
             }
