@@ -77,7 +77,8 @@ export class OpenListSource implements IMediaSource {
         name: item.name,
         path: path.posix.join(reqPath, item.name),
         isDir: item.is_dir,
-        size: item.size
+        size: item.size,
+        mtime: item.modified ?? item.updated_at ?? item.mtime ?? item.created,
       }));
     } catch (error) {
       console.error('OpenList listDir error:', error);

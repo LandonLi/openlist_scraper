@@ -128,7 +128,7 @@ const formatFileSize = (size?: number) => {
   return `${(size / 1024 / 1024 / 1024).toFixed(1)} GB`;
 };
 
-const formatExplorerMtime = (value?: Date) => {
+const formatExplorerMtime = (value?: string | number | Date) => {
   if (!value) return '--';
   const date = value instanceof Date ? value : new Date(value);
   if (Number.isNaN(date.getTime())) return '--';

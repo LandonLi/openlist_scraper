@@ -182,12 +182,13 @@ function registerIpcHandlers() {
         const items = await fs.readdir(fullPath, { withFileTypes: true });
         const data = await Promise.all(items.map(async (item) => {
           const itemPath = path.join(fullPath, item.name);
-          const stats = item.isFile() ? await fs.stat(itemPath) : null;
+          const stats = await fs.stat(itemPath);
           return {
             name: item.name,
             path: itemPath,
             isDir: item.isDirectory(),
-            size: stats?.size || 0
+            size: item.isFile() ? stats.size : 0,
+            mtime: stats.mtime.toISOString(),
           };
         }));
         data.sort((a, b) => (a.isDir === b.isDir ? a.name.localeCompare(b.name) : a.isDir ? -1 : 1));
@@ -213,6 +214,7 @@ function registerIpcHandlers() {
           path: path.posix.join(reqPath, item.name),
           isDir: item.is_dir,
           size: item.size,
+          mtime: item.modified ?? item.updated_at ?? item.mtime ?? item.created,
         }));
         items.sort((a, b) => (a.isDir === b.isDir ? a.name.localeCompare(b.name) : a.isDir ? -1 : 1));
         return { success: true, data: items, currentPath: reqPath };
