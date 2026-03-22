@@ -553,18 +553,23 @@ export default function App() {
   }, [theme]);
 
   // Handlers
-  const handleConfirmSeries = (seriesId: string | null) => {
-    // 找到用户选择的剧集对象,提取剧集名称
-    const selected = seriesId ? wizardData.seriesResults?.find((result) => result.id === seriesId) : null;
+  const handleConfirmSeries = (selected: SearchResult | null) => {
+    if (selected?.mediaType === 'movie') {
+      setWizardData((prev) => ({
+        ...prev,
+        notice: '当前版本暂不支持电影后续执行流程，请切换到电视剧结果继续，或等待 #56 完成。',
+      }));
+      return;
+    }
 
     window.ipcRenderer.send('scanner-confirm-response', {
-      seriesId,
+      seriesId: selected?.id ?? null,
       seriesName: selected?.title, // 添加用户确认的剧集名称
       mediaType: selected?.mediaType,
       searchMode: wizardData.searchMode ?? 'auto',
     });
 
-    if (!seriesId) {
+    if (!selected?.id) {
       setWizardWizardStage('idle');
       setWizardData({});
     } else {
@@ -622,6 +627,23 @@ export default function App() {
     setMetadataProgress({ current: 0, total: 0 });
 
     if (wizardStage === 'finished') {
+      setScanning(false);
+    }
+  };
+
+  const handleCancelCurrentTask = async () => {
+    try {
+      await window.ipcRenderer.invoke('scanner:cancel');
+      addLog('已请求停止当前任务。', 'warn');
+    } catch (error) {
+      addLog(`停止任务失败: ${getErrorMessage(error)}`, 'error');
+    } finally {
+      setWizardWizardStage('idle');
+      setWizardData({});
+      setScrapeProgress({ percent: 0, message: '' });
+      setMetadataFetched(false);
+      setFetchingMetadata(false);
+      setMetadataProgress({ current: 0, total: 0 });
       setScanning(false);
     }
   };
@@ -1845,6 +1867,11 @@ export default function App() {
           <div className={clsx("bg-white dark:bg-slate-900 w-full rounded-2xl shadow-2xl flex flex-col overflow-hidden border border-slate-200 dark:border-slate-800 transition-all", wizardStage === 'series' ? "max-w-2xl" : "max-w-5xl")}>
             <div className="p-6 border-b border-slate-200 dark:border-slate-800 flex justify-between items-center">
               <div><h2 className="text-xl font-bold">{wizardStage === 'series' && "请选择正确的条目"}{wizardStage === 'loading_episodes' && "正在获取元数据"}{wizardStage === 'episodes' && "审查与执行操作"}{wizardStage === 'executing' && "正在执行操作"}{wizardStage === 'finished' && "任务已完成"}</h2><p className="text-sm text-slate-500 mt-1">{wizardStage === 'series' && <span>检测到： <span className="text-blue-500 font-bold">{wizardData.detectedName}</span> • 当前类型：<span className="font-bold">{searchModeOptions.find((option) => option.value === (wizardData.searchMode ?? 'auto'))?.label}</span></span>}{wizardStage === 'episodes' && <span>剧集： <span className="text-blue-500 font-bold">{wizardData.seriesName}</span> • <span className="font-bold">{selectedIndices.length}</span> 个项目</span>}</p></div>
+              {(wizardStage === 'loading_episodes' || wizardStage === 'executing') && (
+                <button onClick={handleCancelCurrentTask} className="px-3 py-1.5 text-xs font-bold rounded-lg border border-rose-200 text-rose-600 hover:bg-rose-50">
+                  停止任务
+                </button>
+              )}
               {(wizardStage === 'series' || wizardStage === 'episodes' || wizardStage === 'finished') && <button onClick={closeWizard} className="p-2 hover:bg-slate-100 rounded-full"><X className="w-5 h-5" /></button>}
             </div>
             {wizardStage === 'series' && (
@@ -1895,7 +1922,7 @@ export default function App() {
                 {wizardData.seriesResults !== undefined && wizardData.seriesResults.length === 0 && <div className="text-center py-10 text-slate-400">未找到相关结果，请切换搜索类型或尝试其他关键词。</div>}
 
                 {wizardData.seriesResults && wizardData.seriesResults.map((item) => (
-                  <div key={`${item.mediaType}:${item.id}`} onClick={() => handleConfirmSeries(item.id)} className="flex gap-4 p-3 rounded-xl border hover:border-blue-500 cursor-pointer transition-all">
+                  <div key={`${item.mediaType}:${item.id}`} onClick={() => handleConfirmSeries(item)} className="flex gap-4 p-3 rounded-xl border hover:border-blue-500 cursor-pointer transition-all">
                     {item.poster ? <img src={item.poster} className="w-20 h-28 object-cover rounded-md" alt="" /> : <div className="w-20 h-28 bg-slate-100 rounded-md flex items-center justify-center"><File className="w-8 h-8 text-slate-400" /></div>}
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center gap-2">

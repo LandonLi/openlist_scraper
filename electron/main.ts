@@ -295,6 +295,11 @@ function registerIpcHandlers() {
     }
   });
 
+  ipcMain.handle('scanner:cancel', async () => {
+    scannerService.requestCancel();
+    return { success: true };
+  });
+
   ipcMain.handle('scanner:identify-single', async (_, sourceConfig: ScanSourceRequest) => {
     try {
       const source = SourceFactory.create(sourceConfig.type, sourceConfig.id, 'Source');

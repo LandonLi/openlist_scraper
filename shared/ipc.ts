@@ -186,6 +186,7 @@ export interface WindowIpcRenderer {
   invoke(channel: 'rules:save', rules: RuleDefinition[]): Promise<SuccessResponse>;
   invoke(channel: 'scanner:fetch-metadata', request: FetchMetadataRequest): Promise<FetchMetadataResponse>;
   invoke(channel: 'scanner:identify-single', request: ScanSourceRequest): Promise<AsyncResult<Record<string, never>>>;
+  invoke(channel: 'scanner:cancel'): Promise<SuccessResponse>;
   invoke(channel: 'scanner:scan-selected', request: ScanSelectedRequest): Promise<AsyncResult<Record<string, never>>>;
   invoke(channel: 'scanner:smart-identify', request: SmartIdentifyRequest): Promise<SmartIdentifyResponse>;
   invoke(channel: 'scanner:start', request: ScanSourceRequest): Promise<AsyncResult<Record<string, never>>>;
