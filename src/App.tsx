@@ -557,7 +557,7 @@ export default function App() {
     if (selected?.mediaType === 'movie') {
       setWizardData((prev) => ({
         ...prev,
-        notice: '当前版本暂不支持电影后续执行流程，请切换到电视剧结果继续，或等待 #56 完成。',
+        notice: '已识别为电影。当前流程暂不支持电影的后续元数据执行，请改用电视剧结果或关闭本次向导。',
       }));
       return;
     }
