@@ -12,6 +12,7 @@ import type {
   EpisodeMatchItem,
   FileItem,
   LogLevel,
+  MediaSearchMode,
   MetadataProgressPayload,
   RuleDefinition,
   ScannerLogPayload,
@@ -34,6 +35,7 @@ type UpdateInfoState = {
 type WizardState = {
   detectedName?: string;
   seriesResults?: SearchResult[];
+  searchMode?: MediaSearchMode;
   seriesName?: string;
   seriesId?: string;
   matches?: EpisodeMatchItem[];
@@ -47,6 +49,11 @@ const batchOptionDefinitions: Array<{ id: keyof BatchOptions; label: string }> =
   { id: 'writeNfo', label: '生成 NFO' },
   { id: 'writePoster', label: '下载海报' },
   { id: 'writeStill', label: '下载剧照' },
+];
+const searchModeOptions: Array<{ value: MediaSearchMode; label: string }> = [
+  { value: 'auto', label: '自动' },
+  { value: 'tv', label: '电视剧' },
+  { value: 'movie', label: '电影' },
 ];
 
 const StatusMessage = ({ result }: { result: StatusResult | null }) => {
@@ -447,7 +454,7 @@ export default function App() {
       setMetadataFetched(false);
       setFetchingMetadata(false);
       setMetadataProgress({ current: 0, total: 0 });
-      setWizardData({ detectedName: data.detectedName, seriesResults: data.results });
+      setWizardData({ detectedName: data.detectedName, seriesResults: data.results, searchMode: data.searchMode });
       setManualSeriesName(data.detectedName); // Initialize with detected name
       setWizardWizardStage('series');
     };
@@ -546,7 +553,9 @@ export default function App() {
 
     window.ipcRenderer.send('scanner-confirm-response', {
       seriesId,
-      seriesName: selected?.title // 添加用户确认的剧集名称
+      seriesName: selected?.title, // 添加用户确认的剧集名称
+      mediaType: selected?.mediaType,
+      searchMode: wizardData.searchMode ?? 'auto',
     });
 
     if (!seriesId) {
@@ -561,10 +570,23 @@ export default function App() {
     if (!manualSeriesName.trim()) return;
 
     // Send IPC request with new name
-    window.ipcRenderer.send('scanner-confirm-response', { seriesId: null, newName: manualSeriesName });
+    window.ipcRenderer.send('scanner-confirm-response', {
+      seriesId: null,
+      newName: manualSeriesName,
+      searchMode: wizardData.searchMode ?? 'auto',
+    });
 
     // Set to undefined to indicate loading state (distinct from empty array which means no results)
     setWizardData(prev => ({ ...prev, seriesResults: undefined }));
+  };
+
+  const handleSearchModeChange = (mode: MediaSearchMode) => {
+    if ((wizardData.searchMode ?? 'auto') === mode) return;
+    setWizardData(prev => ({ ...prev, searchMode: mode, seriesResults: undefined }));
+    window.ipcRenderer.send('scanner-confirm-response', {
+      seriesId: null,
+      searchMode: mode,
+    });
   };
 
   const handleConfirmEpisodes = (confirmed: boolean) => {
@@ -1816,11 +1838,27 @@ export default function App() {
         <div className="fixed inset-0 z-[200] flex items-center justify-center bg-slate-950/50 backdrop-blur-sm p-6 animate-in fade-in duration-200">
           <div className={clsx("bg-white dark:bg-slate-900 w-full rounded-2xl shadow-2xl flex flex-col overflow-hidden border border-slate-200 dark:border-slate-800 transition-all", wizardStage === 'series' ? "max-w-2xl" : "max-w-5xl")}>
             <div className="p-6 border-b border-slate-200 dark:border-slate-800 flex justify-between items-center">
-              <div><h2 className="text-xl font-bold">{wizardStage === 'series' && "请选择正确的剧集"}{wizardStage === 'loading_episodes' && "正在获取元数据"}{wizardStage === 'episodes' && "审查与执行操作"}{wizardStage === 'executing' && "正在执行操作"}{wizardStage === 'finished' && "任务已完成"}</h2><p className="text-sm text-slate-500 mt-1">{wizardStage === 'series' && <span>检测到： <span className="text-blue-500 font-bold">{wizardData.detectedName}</span></span>}{wizardStage === 'episodes' && <span>剧集： <span className="text-blue-500 font-bold">{wizardData.seriesName}</span> • <span className="font-bold">{selectedIndices.length}</span> 个项目</span>}</p></div>
+              <div><h2 className="text-xl font-bold">{wizardStage === 'series' && "请选择正确的条目"}{wizardStage === 'loading_episodes' && "正在获取元数据"}{wizardStage === 'episodes' && "审查与执行操作"}{wizardStage === 'executing' && "正在执行操作"}{wizardStage === 'finished' && "任务已完成"}</h2><p className="text-sm text-slate-500 mt-1">{wizardStage === 'series' && <span>检测到： <span className="text-blue-500 font-bold">{wizardData.detectedName}</span> • 当前类型：<span className="font-bold">{searchModeOptions.find((option) => option.value === (wizardData.searchMode ?? 'auto'))?.label}</span></span>}{wizardStage === 'episodes' && <span>剧集： <span className="text-blue-500 font-bold">{wizardData.seriesName}</span> • <span className="font-bold">{selectedIndices.length}</span> 个项目</span>}</p></div>
               {(wizardStage === 'series' || wizardStage === 'episodes' || wizardStage === 'finished') && <button onClick={closeWizard} className="p-2 hover:bg-slate-100 rounded-full"><X className="w-5 h-5" /></button>}
             </div>
             {wizardStage === 'series' && (
               <div className="flex-1 overflow-y-auto p-4 space-y-3 max-h-[60vh]">
+                <div className="flex items-center gap-2 bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700 rounded-xl p-2">
+                  {searchModeOptions.map((option) => (
+                    <button
+                      key={option.value}
+                      onClick={() => handleSearchModeChange(option.value)}
+                      className={clsx(
+                        "px-3 py-1.5 rounded-lg text-xs font-bold transition-all",
+                        (wizardData.searchMode ?? 'auto') === option.value
+                          ? "bg-blue-600 text-white"
+                          : "text-slate-500 hover:text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-900/20"
+                      )}
+                    >
+                      {option.label}
+                    </button>
+                  ))}
+                </div>
                 <div className="bg-blue-50 dark:bg-blue-900/10 border border-blue-100 dark:border-blue-900/30 rounded-xl p-4 mb-4">
                   <label className="text-xs font-bold text-blue-500 uppercase tracking-widest block mb-2">识别结果不准确？手动搜索：</label>
                   <div className="flex gap-2">
@@ -1829,7 +1867,7 @@ export default function App() {
                       value={manualSeriesName}
                       onChange={e => setManualSeriesName(e.target.value)}
                       onKeyDown={e => e.key === 'Enter' && handleManualSearch()}
-                      placeholder="输入剧集名称..."
+                      placeholder="输入剧名或电影名..."
                       className="flex-1 bg-white dark:bg-slate-900 border border-blue-200 dark:border-blue-800 rounded-lg px-4 py-2 text-sm outline-none focus:ring-2 ring-blue-500"
                     />
                     <button onClick={handleManualSearch} disabled={!manualSeriesName.trim()} className="bg-blue-600 hover:bg-blue-500 text-white px-4 py-2 rounded-lg text-xs font-bold transition-all shadow-lg shadow-blue-500/20 disabled:opacity-50 disabled:cursor-not-allowed">
@@ -1843,12 +1881,20 @@ export default function App() {
                     <span className="text-xs font-medium uppercase tracking-widest">正在搜索 "{manualSeriesName}"...</span>
                   </div>
                 )}
-                {wizardData.seriesResults !== undefined && wizardData.seriesResults.length === 0 && <div className="text-center py-10 text-slate-400">未找到相关结果，请尝试其他关键词。</div>}
+                {wizardData.seriesResults !== undefined && wizardData.seriesResults.length === 0 && <div className="text-center py-10 text-slate-400">未找到相关结果，请切换搜索类型或尝试其他关键词。</div>}
 
                 {wizardData.seriesResults && wizardData.seriesResults.map((item) => (
-                  <div key={item.id} onClick={() => handleConfirmSeries(item.id)} className="flex gap-4 p-3 rounded-xl border hover:border-blue-500 cursor-pointer transition-all">
+                  <div key={`${item.mediaType}:${item.id}`} onClick={() => handleConfirmSeries(item.id)} className="flex gap-4 p-3 rounded-xl border hover:border-blue-500 cursor-pointer transition-all">
                     {item.poster ? <img src={item.poster} className="w-20 h-28 object-cover rounded-md" alt="" /> : <div className="w-20 h-28 bg-slate-100 rounded-md flex items-center justify-center"><File className="w-8 h-8 text-slate-400" /></div>}
-                    <div className="flex-1 min-w-0"><h4 className="font-bold text-lg truncate">{item.title} ({item.year || 'N/A'})</h4><p className="text-xs text-slate-500 line-clamp-3 mt-1">{item.overview}</p></div>
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2">
+                        <h4 className="font-bold text-lg truncate">{item.title} ({item.year || 'N/A'})</h4>
+                        <span className={clsx("text-[10px] px-2 py-0.5 rounded-full font-bold", item.mediaType === 'movie' ? "bg-amber-100 text-amber-700" : "bg-blue-100 text-blue-700")}>
+                          {item.mediaType === 'movie' ? '电影' : '电视剧'}
+                        </span>
+                      </div>
+                      <p className="text-xs text-slate-500 line-clamp-3 mt-1">{item.overview}</p>
+                    </div>
                   </div>
                 ))}
                 {wizardData.seriesResults && <button onClick={() => handleConfirmSeries(null)} className="w-full p-4 border-2 border-dashed rounded-xl text-sm font-bold text-slate-400">跳过并使用原文件名</button>}

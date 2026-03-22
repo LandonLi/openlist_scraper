@@ -5,6 +5,8 @@ import type {
   EpisodeMatchItem,
   FileItem,
   MetadataProgressPayload,
+  MediaSearchMode,
+  MediaType,
   RuleDefinition,
   ScannerLogPayload,
   ScannerOperationProgressPayload,
@@ -135,12 +137,15 @@ export type ConfigKey = keyof ConfigValueMap;
 export interface ScannerRequireConfirmationPayload {
   detectedName: string;
   results: SearchResult[];
+  searchMode: MediaSearchMode;
 }
 
 export interface ScannerConfirmResponsePayload {
   seriesId: string | null;
   newName?: string;
   seriesName?: string;
+  mediaType?: MediaType;
+  searchMode?: MediaSearchMode;
 }
 
 export interface ScannerEpisodesConfirmResponsePayload {

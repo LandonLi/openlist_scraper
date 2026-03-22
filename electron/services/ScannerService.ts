@@ -16,6 +16,8 @@ import type {
   EpisodeConfirmationPayload,
   EpisodeMatchItem,
   LogLevel,
+  MediaSearchMode,
+  MediaType,
 } from '../../shared/types';
 import { getErrorMessage } from '../utils/errors';
 
@@ -25,6 +27,8 @@ type UserConfirmationResult = {
   poster?: string;
   newName?: string;
   confirmedName?: string;
+  mediaType?: MediaType;
+  searchMode?: MediaSearchMode;
 };
 
 export class ScannerService {
@@ -107,24 +111,37 @@ export class ScannerService {
   private async requestUserConfirmation(
     detectedName: string,
     results: SearchResult[],
+    searchMode: MediaSearchMode,
   ): Promise<UserConfirmationResult | null> {
     if (!this.mainWindow) return null;
     return new Promise((resolve) => {
       setTimeout(() => {
-        this.mainWindow?.webContents.send('scanner-require-confirmation', { detectedName, results });
+        this.mainWindow?.webContents.send('scanner-require-confirmation', { detectedName, results, searchMode });
       }, 200);
       ipcMain.once('scanner-confirm-response', (_event, response: ScannerConfirmResponsePayload) => {
-        // If user provided a new name to search
-        if (response.newName) {
-          resolve({ id: '', newName: response.newName });
+        const trimmedNewName = response.newName?.trim();
+        const modeChanged = Boolean(response.searchMode && response.searchMode !== searchMode);
+
+        // User requests re-search (new name and/or mode)
+        if (trimmedNewName || modeChanged) {
+          resolve({
+            id: '',
+            newName: trimmedNewName,
+            searchMode: response.searchMode,
+          });
           return;
         }
 
-        const selected = results.find(r => r.id === response.seriesId);
+        const selected = results.find((r) => {
+          if (r.id !== response.seriesId) return false;
+          if (!response.mediaType) return true;
+          return r.mediaType === response.mediaType;
+        });
         resolve(selected ? {
           id: selected.id,
           poster: selected.poster,
-          confirmedName: response.seriesName || selected.title
+          confirmedName: response.seriesName || selected.title,
+          mediaType: selected.mediaType,
         } : null);
       });
     });
@@ -248,23 +265,39 @@ export class ScannerService {
     let seriesInfo = this.showMetadataCache.get(seriesName);
     let currentSearchName = seriesName;
     let confirmedSeriesName = seriesName; // 保存用户确认的剧集名称
+    let currentSearchMode: MediaSearchMode = this.inferSearchMode(items);
 
     // Loop until we have series info or user cancels
     while (!seriesInfo) {
-      const results = await this.metadataProvider.searchTVShow(currentSearchName);
+      const results = await this.metadataProvider.search(currentSearchName, currentSearchMode);
       // Always show confirmation for single file identification to be safe
-      const confirmed = await this.requestUserConfirmation(currentSearchName, results);
+      const confirmed = await this.requestUserConfirmation(currentSearchName, results, currentSearchMode);
 
       if (!confirmed) return; // Cancelled
 
       if (confirmed.newName) {
         // User requesting re-search
         currentSearchName = confirmed.newName;
+        if (confirmed.searchMode) {
+          currentSearchMode = confirmed.searchMode;
+        }
         this.log(`用户请求手动修正剧名: ${currentSearchName}, 正在重新搜索...`, 'info');
         continue;
       }
 
+      if (confirmed.searchMode && confirmed.searchMode !== currentSearchMode) {
+        currentSearchMode = confirmed.searchMode;
+        this.log(`用户切换搜索类型为: ${currentSearchMode}`, 'info');
+        continue;
+      }
+
       if (confirmed.id) {
+        if (confirmed.mediaType === 'movie') {
+          this.log('已匹配到电影结果。当前批处理流程仅支持电视剧元数据，请切换为电视剧搜索后重试。', 'warn');
+          currentSearchMode = 'tv';
+          continue;
+        }
+
         seriesInfo = { id: confirmed.id, poster: confirmed.poster };
         // 如果用户确认了剧集名称,使用确认的名称
         if (confirmed.confirmedName) {
@@ -360,6 +393,22 @@ export class ScannerService {
         seriesInfo,
       );
     }
+  }
+
+  private inferSearchMode(items: EpisodeMatchItem[]): MediaSearchMode {
+    const mediaTypeSet = new Set<MediaType>();
+    for (const item of items) {
+      const mediaType = item.match.mediaType;
+      if (mediaType) {
+        mediaTypeSet.add(mediaType);
+      }
+    }
+
+    if (mediaTypeSet.size === 1) {
+      return Array.from(mediaTypeSet)[0];
+    }
+
+    return 'auto';
   }
 
   private async executeBatch(

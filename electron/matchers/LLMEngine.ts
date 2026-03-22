@@ -126,6 +126,7 @@ export class LLMEngine implements IMatcher {
         season: result.season,
         episode: result.episode,
         year: result.year,
+        mediaType: result.type === 'movie' ? 'movie' : 'tv',
         confidence: 0.8, // LLM results are less certain than regex
         source: 'llm'
       };

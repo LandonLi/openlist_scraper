@@ -8,6 +8,11 @@ interface RegexRule {
   type: string;
 }
 
+const toMediaType = (value: string): 'tv' | 'movie' => {
+  if (value === 'movie') return 'movie';
+  return 'tv';
+};
+
 export class RegexEngine implements IMatcher {
   private rules: RegexRule[] = [];
   private readonly loadPromise: Promise<void>;
@@ -54,6 +59,7 @@ export class RegexEngine implements IMatcher {
             season: season ? parseInt(season, 10) : 1, // Default to Season 1
             episode: episode ? parseInt(episode, 10) : undefined,
             year: year,
+            mediaType: toMediaType(rule.type),
             confidence: 1.0, // Regex matches are considered high confidence if they hit
             source: 'regex'
           };
