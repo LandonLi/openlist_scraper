@@ -20,6 +20,7 @@ export interface FileItem {
   isDir: boolean;
   size?: number;
   mtime?: string | number;
+  previewUrl?: string;
 }
 
 export interface SearchResult {
@@ -138,6 +139,7 @@ export interface OpenListListItem {
   size?: number;
   modified?: string;
   created?: string;
+  thumb?: string;
 }
 
 export interface OpenListListResponseData {

@@ -174,6 +174,12 @@ const getFileExtension = (name: string) => {
   return ext.toUpperCase();
 };
 
+const getThumbSidecarName = (fileName: string) => {
+  const index = fileName.lastIndexOf('.');
+  const base = index > 0 ? fileName.slice(0, index) : fileName;
+  return `${base}-thumb.jpg`;
+};
+
 const getErrorMessage = (error: unknown, fallback = '未知错误') => {
   if (error instanceof Error && error.message) return error.message;
   if (typeof error === 'string' && error) return error;
@@ -420,6 +426,8 @@ export default function App() {
   const [fileList, setFileList] = useState<FileItem[]>([]);
   const [loadingFiles, setLoadingFiles] = useState(false);
   const [navHistory, setNavHistory] = useState<string[]>([]);
+  const [thumbnailByPath, setThumbnailByPath] = useState<Record<string, string>>({});
+  const [failedThumbnailPaths, setFailedThumbnailPaths] = useState<Set<string>>(new Set());
 
   // Selection State (Multi-select)
   const [selectedPaths, setSelectedPaths] = useState<Set<string>>(new Set());
@@ -984,6 +992,8 @@ export default function App() {
     setFileList([]);
     setSelectedPaths(new Set());
     setLastClickedIndex(null);
+    setThumbnailByPath({});
+    setFailedThumbnailPaths(new Set());
 
     if (!options?.isBack && currentPath && targetSourceType === sourceType) {
       setNavHistory(prev => [...prev, currentPath]);
@@ -1400,6 +1410,57 @@ export default function App() {
     }
   }, [activeTab, activeUtilityPanel]);
 
+  useEffect(() => {
+    if (viewMode !== 'grid' || fileList.length === 0 || !currentPath) {
+      setThumbnailByPath({});
+      return;
+    }
+
+    let cancelled = false;
+    const config = { localPath, openListUrl, openListToken };
+
+    const resolveThumbnails = async () => {
+      const next: Record<string, string> = {};
+
+      // File cards: use sibling *-thumb.jpg in the same directory.
+      const fileByName = new Map(fileList.map((entry) => [entry.name.toLowerCase(), entry]));
+      for (const entry of fileList) {
+        if (entry.isDir) continue;
+        const sidecar = fileByName.get(getThumbSidecarName(entry.name).toLowerCase());
+        if (!sidecar?.previewUrl) continue;
+        next[entry.path] = sidecar.previewUrl;
+      }
+
+      // Directory cards: probe child directory and prefer poster.jpg.
+      const directories = fileList.filter((entry) => entry.isDir);
+      await Promise.all(directories.map(async (directory) => {
+        try {
+          const result = await window.ipcRenderer.invoke('explorer:list', {
+            type: sourceType,
+            path: directory.path,
+            config,
+          });
+          if (!result.success) return;
+          const posterEntry = result.data.find((entry) => !entry.isDir && entry.name.toLowerCase() === 'poster.jpg');
+          if (!posterEntry?.previewUrl) return;
+          next[directory.path] = posterEntry.previewUrl;
+        } catch {
+          // Ignore and fallback to icon for this card.
+        }
+      }));
+
+      if (!cancelled) {
+        setThumbnailByPath(next);
+      }
+    };
+
+    void resolveThumbnails();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [currentPath, fileList, localPath, openListToken, openListUrl, sourceType, viewMode]);
+
   const isMovieWorkflow = Boolean(
     wizardData.matches && wizardData.matches.some((item) => item.match.mediaType === 'movie')
   );
@@ -1713,7 +1774,7 @@ export default function App() {
 
                   <div className={clsx(
                     viewMode === 'grid'
-                      ? "grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 2xl:grid-cols-5 gap-3"
+                      ? "grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 2xl:grid-cols-5 gap-4"
                       : "flex flex-col gap-1.5"
                   )}>
                     {fileList.length === 0 && (
@@ -1728,6 +1789,7 @@ export default function App() {
 
                     {fileList.map((file, i) => {
                       const isSelected = selectedPaths.has(file.path);
+                      const thumbnailUrl = failedThumbnailPaths.has(file.path) ? undefined : thumbnailByPath[file.path];
                       return (
                         <div
                           key={file.path}
@@ -1735,47 +1797,107 @@ export default function App() {
                           className={clsx(
                             "group relative rounded-xl border transition-all duration-200 cursor-pointer select-none",
                             viewMode === 'grid'
-                              ? "p-4 flex flex-col justify-between min-h-[136px]"
+                              ? "p-3 flex flex-col min-h-[228px]"
                               : "grid grid-cols-[minmax(0,1fr)_160px_120px] items-center gap-2 px-3 py-2.5",
                             isSelected
                               ? "bg-blue-50 dark:bg-blue-900/20 border-blue-500/50 shadow-sm ring-1 ring-blue-500/20"
                               : "bg-white dark:bg-slate-900 border-slate-200/90 dark:border-slate-800 hover:border-blue-300 dark:hover:border-blue-700 hover:shadow-sm"
                           )}
                         >
-                          <div className={clsx("flex items-center gap-2.5 min-w-0", viewMode === 'grid' ? "mb-2" : "flex-1")}>
-                            {!file.isDir && (
-                              <div
-                                className={clsx(
-                                  "w-4 h-4 rounded border flex shrink-0 items-center justify-center transition-all",
-                                  isSelected
-                                    ? "bg-blue-500 border-blue-500"
-                                    : "border-slate-300 dark:border-slate-600 hover:border-blue-400 bg-white dark:bg-slate-800"
+                          {viewMode === 'grid' ? (
+                            <>
+                              <div className={clsx(
+                                "relative w-full overflow-hidden rounded-lg border",
+                                file.isDir
+                                  ? "aspect-[4/3] bg-blue-50/60 dark:bg-blue-950/40 border-blue-100 dark:border-blue-900/70"
+                                  : "aspect-[16/10] bg-slate-100 dark:bg-slate-800 border-slate-200 dark:border-slate-700"
+                              )}>
+                                {!file.isDir && (
+                                  <div
+                                    className={clsx(
+                                      "absolute top-2 right-2 z-20 w-5 h-5 rounded border flex items-center justify-center transition-all",
+                                      isSelected
+                                        ? "bg-blue-500 border-blue-500"
+                                        : "border-slate-300/90 dark:border-slate-600 bg-white/80 dark:bg-slate-900/80 hover:border-blue-400"
+                                    )}
+                                    onClick={(e) => { e.stopPropagation(); toggleSelection(file.path, i, { ctrlKey: e.ctrlKey, shiftKey: e.shiftKey }); }}
+                                  >
+                                    {isSelected && <Check className="w-3 h-3 text-white" />}
+                                  </div>
                                 )}
-                                onClick={(e) => { e.stopPropagation(); toggleSelection(file.path, i, { ctrlKey: e.ctrlKey, shiftKey: e.shiftKey }); }}
-                              >
-                                {isSelected && <Check className="w-3 h-3 text-white" />}
-                              </div>
-                            )}
-                            {file.isDir && <div className="w-4 h-4 shrink-0" />}
 
-                            <div className={clsx(
-                              "w-8 h-8 shrink-0 rounded-lg border flex items-center justify-center",
-                              file.isDir
-                                ? "bg-blue-50 dark:bg-blue-900/20 border-blue-200 dark:border-blue-800 text-blue-600 dark:text-blue-300"
-                                : "bg-slate-100 dark:bg-slate-800 border-slate-200 dark:border-slate-700 text-slate-500 dark:text-slate-300"
-                            )}>
-                              {file.isDir ? <Folder className="w-4 h-4" /> : <File className="w-4 h-4" />}
-                            </div>
+                                {thumbnailUrl ? (
+                                  <img
+                                    src={thumbnailUrl}
+                                    alt={file.name}
+                                    className="w-full h-full object-cover"
+                                    onError={() => {
+                                      setFailedThumbnailPaths((prev) => {
+                                        const next = new Set(prev);
+                                        next.add(file.path);
+                                        return next;
+                                      });
+                                    }}
+                                  />
+                                ) : (
+                                  <div className="w-full h-full flex items-center justify-center">
+                                    <div className={clsx(
+                                      "w-11 h-11 rounded-xl border flex items-center justify-center",
+                                      file.isDir
+                                        ? "bg-blue-100/80 dark:bg-blue-900/40 border-blue-200 dark:border-blue-800 text-blue-600 dark:text-blue-300"
+                                        : "bg-white/80 dark:bg-slate-900/80 border-slate-200 dark:border-slate-700 text-slate-500 dark:text-slate-300"
+                                    )}>
+                                      {file.isDir ? <Folder className="w-5 h-5" /> : <File className="w-5 h-5" />}
+                                    </div>
+                                  </div>
+                                )}
+                              </div>
 
-                            <div className="min-w-0">
-                              <div className={clsx("truncate text-sm", file.isDir ? "text-slate-900 dark:text-slate-100 font-bold" : "text-slate-700 dark:text-slate-200 font-medium")}>
-                                {file.name}
+                              <div className="mt-3 min-w-0">
+                                <div className={clsx("truncate text-sm", file.isDir ? "text-slate-900 dark:text-slate-100 font-bold" : "text-slate-700 dark:text-slate-200 font-medium")}>
+                                  {file.name}
+                                </div>
+                                <div className="mt-1 text-[11px] text-slate-400 truncate">
+                                  {file.isDir ? '文件夹' : getFileExtension(file.name)}
+                                </div>
                               </div>
-                              <div className="text-[11px] text-slate-400 truncate">
-                                {file.isDir ? '文件夹' : getFileExtension(file.name)}
+                            </>
+                          ) : (
+                            <div className="flex items-center gap-2.5 min-w-0 flex-1">
+                              {!file.isDir && (
+                                <div
+                                  className={clsx(
+                                    "w-4 h-4 rounded border flex shrink-0 items-center justify-center transition-all",
+                                    isSelected
+                                      ? "bg-blue-500 border-blue-500"
+                                      : "border-slate-300 dark:border-slate-600 hover:border-blue-400 bg-white dark:bg-slate-800"
+                                  )}
+                                  onClick={(e) => { e.stopPropagation(); toggleSelection(file.path, i, { ctrlKey: e.ctrlKey, shiftKey: e.shiftKey }); }}
+                                >
+                                  {isSelected && <Check className="w-3 h-3 text-white" />}
+                                </div>
+                              )}
+                              {file.isDir && <div className="w-4 h-4 shrink-0" />}
+
+                              <div className={clsx(
+                                "w-8 h-8 shrink-0 rounded-lg border flex items-center justify-center",
+                                file.isDir
+                                  ? "bg-blue-50 dark:bg-blue-900/20 border-blue-200 dark:border-blue-800 text-blue-600 dark:text-blue-300"
+                                  : "bg-slate-100 dark:bg-slate-800 border-slate-200 dark:border-slate-700 text-slate-500 dark:text-slate-300"
+                              )}>
+                                {file.isDir ? <Folder className="w-4 h-4" /> : <File className="w-4 h-4" />}
+                              </div>
+
+                              <div className="min-w-0">
+                                <div className={clsx("truncate text-sm", file.isDir ? "text-slate-900 dark:text-slate-100 font-bold" : "text-slate-700 dark:text-slate-200 font-medium")}>
+                                  {file.name}
+                                </div>
+                                <div className="text-[11px] text-slate-400 truncate">
+                                  {file.isDir ? '文件夹' : getFileExtension(file.name)}
+                                </div>
                               </div>
                             </div>
-                          </div>
+                          )}
 
                           {viewMode === 'list' && (
                             <>
@@ -1789,7 +1911,7 @@ export default function App() {
                           )}
 
                           {viewMode === 'grid' && (
-                            <div className="mt-2 flex items-center justify-between text-[10px] uppercase tracking-[0.14em]">
+                            <div className="mt-auto pt-3 flex items-center justify-between text-[10px] uppercase tracking-[0.14em]">
                               <span className="text-slate-400">{file.isDir ? 'Folder' : getFileExtension(file.name)}</span>
                               <span className="text-slate-500 dark:text-slate-400 font-semibold tabular-nums">{file.isDir ? '--' : formatFileSize(file.size)}</span>
                             </div>
