@@ -140,6 +140,7 @@ export interface ScrapedMedia {
   id?: number;
   filePath: string;
   sourceId: string;
+  sourceType?: 'local' | 'openlist';
   seriesName: string;
   season: number;
   episode: number;
@@ -175,6 +176,7 @@ export class DatabaseService {
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         file_path TEXT NOT NULL,
         source_id TEXT NOT NULL,
+        source_type TEXT,
         series_name TEXT,
         season INTEGER,
         episode INTEGER,
@@ -200,18 +202,22 @@ export class DatabaseService {
     if (!columns.includes('runtime')) {
       this.db.exec("ALTER TABLE scraped_media ADD COLUMN runtime INTEGER");
     }
+    if (!columns.includes('source_type')) {
+      this.db.exec("ALTER TABLE scraped_media ADD COLUMN source_type TEXT");
+    }
   }
 
   saveMedia(media: Omit<ScrapedMedia, 'id' | 'scrapedAt'>) {
     const stmt = this.db.prepare(`
       INSERT INTO scraped_media (
-        file_path, source_id, series_name, season, episode, 
+        file_path, source_id, source_type, series_name, season, episode,
         tmdb_id, episode_title, overview, poster, still, air_date, runtime
       ) VALUES (
-        @filePath, @sourceId, @seriesName, @season, @episode,
+        @filePath, @sourceId, @sourceType, @seriesName, @season, @episode,
         @tmdbId, @episodeTitle, @overview, @poster, @still, @airDate, @runtime
       )
       ON CONFLICT(source_id, file_path) DO UPDATE SET
+        source_type = excluded.source_type,
         series_name = excluded.series_name,
         season = excluded.season,
         episode = excluded.episode,

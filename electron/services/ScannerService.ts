@@ -591,6 +591,7 @@ export class ScannerService {
       this.dbService.saveMedia({
         filePath: item.file.path,
         sourceId: source.id,
+        sourceType: source.type === 'openlist' ? 'openlist' : 'local',
         seriesName,
         season: item.match.mediaType === 'movie' ? 0 : (item.match.season ?? 1),
         episode: item.match.mediaType === 'movie' ? 0 : (item.match.episode ?? 1),

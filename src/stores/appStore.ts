@@ -7,6 +7,7 @@ export interface ScrapedMediaRecord {
   id?: number;
   file_path: string;
   source_id: string;
+  source_type?: SourceType;
   series_name?: string;
   season?: number;
   episode?: number;
