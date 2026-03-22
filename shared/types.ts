@@ -5,7 +5,7 @@ export type MediaSearchMode = 'auto' | MediaType;
 export type LogType = 'info' | 'success' | 'error' | 'warn' | 'debug';
 export type LogLevel = 'info' | 'warn' | 'error' | 'debug';
 export type ThemeMode = 'dark' | 'light';
-export type ViewMode = 'grid' | 'list';
+export type ViewMode = 'list';
 export type RuleType = 'tv' | 'movie' | 'anime';
 
 export interface RuleDefinition {
