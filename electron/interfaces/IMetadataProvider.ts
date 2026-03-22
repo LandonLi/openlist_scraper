@@ -1,4 +1,4 @@
-import type { EpisodeData, MediaSearchMode, SearchResult } from '../../shared/types';
+import type { EpisodeData, MediaSearchMode, MovieData, SearchResult } from '../../shared/types';
 
 export type { EpisodeData, SearchResult };
 
@@ -7,6 +7,7 @@ export interface IMetadataProvider {
   search(query: string, mode?: MediaSearchMode): Promise<SearchResult[]>;
   getSeasonDetails(showId: string, season: number): Promise<EpisodeData[]>;
   getEpisodeDetails(showId: string, season: number, episode: number): Promise<EpisodeData | null>;
+  getMovieDetails(movieId: string): Promise<MovieData | null>;
   setDebugLogger?(logger: (message: string) => void): void;
   setProxy?(proxyUrl: string): void;
 }

@@ -554,14 +554,6 @@ export default function App() {
 
   // Handlers
   const handleConfirmSeries = (selected: SearchResult | null) => {
-    if (selected?.mediaType === 'movie') {
-      setWizardData((prev) => ({
-        ...prev,
-        notice: '已识别为电影。当前流程暂不支持电影的后续元数据执行，请改用电视剧结果或关闭本次向导。',
-      }));
-      return;
-    }
-
     window.ipcRenderer.send('scanner-confirm-response', {
       seriesId: selected?.id ?? null,
       seriesName: selected?.title, // 添加用户确认的剧集名称
@@ -1212,6 +1204,10 @@ export default function App() {
       setActiveUtilityPanel(null);
     }
   }, [activeTab, activeUtilityPanel]);
+
+  const isMovieWorkflow = Boolean(
+    wizardData.matches && wizardData.matches.some((item) => item.match.mediaType === 'movie')
+  );
 
   return (
     <div className="flex h-screen bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-slate-100 overflow-hidden">
@@ -1866,7 +1862,30 @@ export default function App() {
         <div className="fixed inset-0 z-[200] flex items-center justify-center bg-slate-950/50 backdrop-blur-sm p-6 animate-in fade-in duration-200">
           <div className={clsx("bg-white dark:bg-slate-900 w-full rounded-2xl shadow-2xl flex flex-col overflow-hidden border border-slate-200 dark:border-slate-800 transition-all", wizardStage === 'series' ? "max-w-2xl" : "max-w-5xl")}>
             <div className="p-6 border-b border-slate-200 dark:border-slate-800 flex justify-between items-center">
-              <div><h2 className="text-xl font-bold">{wizardStage === 'series' && "请选择正确的条目"}{wizardStage === 'loading_episodes' && "正在获取元数据"}{wizardStage === 'episodes' && "审查与执行操作"}{wizardStage === 'executing' && "正在执行操作"}{wizardStage === 'finished' && "任务已完成"}</h2><p className="text-sm text-slate-500 mt-1">{wizardStage === 'series' && <span>检测到： <span className="text-blue-500 font-bold">{wizardData.detectedName}</span> • 当前类型：<span className="font-bold">{searchModeOptions.find((option) => option.value === (wizardData.searchMode ?? 'auto'))?.label}</span></span>}{wizardStage === 'episodes' && <span>剧集： <span className="text-blue-500 font-bold">{wizardData.seriesName}</span> • <span className="font-bold">{selectedIndices.length}</span> 个项目</span>}</p></div>
+              <div>
+                <h2 className="text-xl font-bold">
+                  {wizardStage === 'series' && "请选择正确的条目"}
+                  {wizardStage === 'loading_episodes' && "正在获取元数据"}
+                  {wizardStage === 'episodes' && "审查与执行操作"}
+                  {wizardStage === 'executing' && "正在执行操作"}
+                  {wizardStage === 'finished' && "任务已完成"}
+                </h2>
+                <p className="text-sm text-slate-500 mt-1">
+                  {wizardStage === 'series' && (
+                    <span>
+                      检测到： <span className="text-blue-500 font-bold">{wizardData.detectedName}</span> • 当前类型：
+                      <span className="font-bold">{searchModeOptions.find((option) => option.value === (wizardData.searchMode ?? 'auto'))?.label}</span>
+                    </span>
+                  )}
+                  {wizardStage === 'episodes' && (
+                    <span>
+                      {isMovieWorkflow ? '电影' : '剧集'}：
+                      <span className="text-blue-500 font-bold"> {wizardData.seriesName}</span> •
+                      <span className="font-bold"> {selectedIndices.length}</span> 个项目
+                    </span>
+                  )}
+                </p>
+              </div>
               {(wizardStage === 'loading_episodes' || wizardStage === 'executing') && (
                 <button onClick={handleCancelCurrentTask} className="px-3 py-1.5 text-xs font-bold rounded-lg border border-rose-200 text-rose-600 hover:bg-rose-50">
                   停止任务
@@ -1952,7 +1971,7 @@ export default function App() {
                   </div>
                 </div>
                 {/* Batch Edit Actions */}
-                {selectedIndices.length > 1 && (
+                {!isMovieWorkflow && selectedIndices.length > 1 && (
                   <div className="px-6 py-3 bg-amber-50 dark:bg-amber-900/10 border-b border-amber-200 dark:border-amber-900/30">
                     <div className="flex items-center gap-3">
                       <span className="text-xs font-bold text-amber-700 dark:text-amber-400">
@@ -1986,7 +2005,7 @@ export default function App() {
                   </div>
                 )}
                 {/* Smart Identify Button */}
-                {wizardData.matches && wizardData.matches.some((item) => !item.match.success || item.match.source === 'unmatched') && (
+                {!isMovieWorkflow && wizardData.matches && wizardData.matches.some((item) => !item.match.success || item.match.source === 'unmatched') && (
                   <div className="px-6 py-3 bg-amber-50 dark:bg-amber-900/10 border-b border-amber-200 dark:border-amber-900/30">
                     <button
                       onClick={handleSmartIdentify}
@@ -2011,7 +2030,7 @@ export default function App() {
                   </div>
                 )}
                 {/* Fetch Metadata Button */}
-                {!metadataFetched && !fetchingMetadata && wizardData.matches && wizardData.matches.some((item) => !item.metadata) && (
+                {!isMovieWorkflow && !metadataFetched && !fetchingMetadata && wizardData.matches && wizardData.matches.some((item) => !item.metadata) && (
                   <div className="px-6 py-3 bg-blue-50 dark:bg-blue-900/10 border-b border-blue-200 dark:border-blue-900/30">
                     <button
                       onClick={handleFetchMetadata}
@@ -2036,7 +2055,7 @@ export default function App() {
                           {metadataProgress?.total > 0 ? (
                             `已获取 ${metadataProgress.current}/${metadataProgress.total} 集`
                           ) : (
-                            '从 TMDB 获取剧集详情中，请稍候...'
+                            '从 TMDB 获取详情中，请稍候...'
                           )}
                         </p>
                       </div>
@@ -2056,9 +2075,15 @@ export default function App() {
                     <tbody className="divide-y divide-slate-200">
                       {wizardData.matches?.map((item, idx) => {
                         const fileExt = item.file.name.substring(item.file.name.lastIndexOf('.'));
+                        const isMovieItem = item.match.mediaType === 'movie';
                         // 根据总集数自动计算需要的位数（最少2位）
                         const episodeDigits = Math.max(2, String(item.match.totalEpisodes || 0).length);
-                        const newName = item.metadata ? `${wizardData.seriesName} - S${String(item.match.season ?? 1).padStart(2, '0')}E${String(item.match.episode ?? 1).padStart(episodeDigits, '0')} - ${item.metadata.title}${fileExt}` : '';
+                        const movieYear = item.metadata?.airDate?.slice(0, 4);
+                        const newName = item.metadata
+                          ? (isMovieItem
+                            ? `${item.metadata.title}${movieYear ? ` (${movieYear})` : ''}${fileExt}`
+                            : `${wizardData.seriesName} - S${String(item.match.season ?? 1).padStart(2, '0')}E${String(item.match.episode ?? 1).padStart(episodeDigits, '0')} - ${item.metadata.title}${fileExt}`)
+                          : '';
                         return (
                           <tr key={idx} className={clsx(!selectedIndices.includes(idx) && "opacity-50")}>
                             <td className="px-6 py-4"><input type="checkbox" checked={selectedIndices.includes(idx)} onChange={() => toggleIndex(idx)} /></td>
@@ -2067,12 +2092,18 @@ export default function App() {
                               {batchOptions.rename && newName && newName !== item.file.name && (<div className="text-green-600 font-bold truncate">→ {newName}</div>)}
                             </td>
                             <td className="px-6 py-4 text-center">
-                              <button
-                                onClick={() => { setEditingMatchIndex(idx); setEditMatchValues({ season: item.match.season ?? 1, episode: item.match.episode ?? 1 }); }}
-                                className="px-2 py-1 rounded hover:bg-slate-100 dark:hover:bg-slate-800 text-xs font-bold text-slate-500 hover:text-blue-600 transition-colors border border-transparent hover:border-blue-200"
-                              >
-                                S{String(item.match.season ?? 1).padStart(2, '0')}E{String(item.match.episode ?? 1).padStart(Math.max(2, String(item.match.totalEpisodes || 0).length), '0')}
-                              </button>
+                              {isMovieItem ? (
+                                <span className="px-2 py-1 rounded text-xs font-bold text-amber-700 bg-amber-100">
+                                  电影
+                                </span>
+                              ) : (
+                                <button
+                                  onClick={() => { setEditingMatchIndex(idx); setEditMatchValues({ season: item.match.season ?? 1, episode: item.match.episode ?? 1 }); }}
+                                  className="px-2 py-1 rounded hover:bg-slate-100 dark:hover:bg-slate-800 text-xs font-bold text-slate-500 hover:text-blue-600 transition-colors border border-transparent hover:border-blue-200"
+                                >
+                                  S{String(item.match.season ?? 1).padStart(2, '0')}E{String(item.match.episode ?? 1).padStart(Math.max(2, String(item.match.totalEpisodes || 0).length), '0')}
+                                </button>
+                              )}
                             </td>
                             <td className="px-6 py-4 cursor-pointer" onClick={() => handleShowEpisodeDetail(item)}>{item.metadata ? <div className="flex items-center gap-2">{item.metadata.stillPath && <img src={item.metadata.stillPath} className="w-10 h-6 object-cover rounded" alt="" />}<div className="text-xs font-bold text-blue-600 truncate">{item.metadata.title}</div></div> : <span className="text-[10px] text-red-400">无元数据</span>}</td>
                           </tr>

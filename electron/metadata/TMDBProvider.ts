@@ -4,7 +4,9 @@ import { ProxyHelper } from '../utils/ProxyHelper';
 import type {
   MediaSearchMode,
   MediaType,
+  MovieData,
   TmdbEpisodeItem,
+  TmdbMovieItem,
   TmdbSearchResponse,
   TmdbSeasonResponse,
 } from '../../shared/types';
@@ -184,6 +186,34 @@ export class TMDBProvider implements IMetadataProvider {
         return null;
       }
       console.error('TMDB Episode Details Error:', error);
+      return null;
+    }
+  }
+
+  async getMovieDetails(movieId: string): Promise<MovieData | null> {
+    try {
+      for (const language of this.fallbackLanguages) {
+        const response = await this.api.get<TmdbMovieItem>(`/movie/${movieId}`, {
+          params: { language },
+        });
+        const movie = response.data;
+        if (!movie?.id) continue;
+
+        return {
+          id: movie.id.toString(),
+          title: movie.title,
+          overview: movie.overview,
+          releaseDate: movie.release_date,
+          posterPath: movie.poster_path ? `${this.imageBaseUrl}${movie.poster_path}` : undefined,
+          runtime: movie.runtime,
+        };
+      }
+      return null;
+    } catch (error) {
+      if (FetchClient.isFetchError(error) && error.response?.status === 404) {
+        return null;
+      }
+      console.error('TMDB Movie Details Error:', error);
       return null;
     }
   }

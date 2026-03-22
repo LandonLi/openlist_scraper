@@ -44,6 +44,15 @@ export interface EpisodeData {
   runtime?: number;
 }
 
+export interface MovieData {
+  id: string;
+  title: string;
+  overview?: string;
+  releaseDate?: string;
+  posterPath?: string;
+  runtime?: number;
+}
+
 export type MatchSource =
   | 'regex'
   | 'llm'
@@ -165,6 +174,15 @@ export interface TmdbEpisodeItem {
   overview?: string;
   air_date?: string;
   still_path?: string | null;
+  runtime?: number;
+}
+
+export interface TmdbMovieItem {
+  id: number;
+  title: string;
+  overview?: string;
+  release_date?: string;
+  poster_path?: string | null;
   runtime?: number;
 }
 

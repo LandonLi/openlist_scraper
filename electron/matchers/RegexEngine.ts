@@ -53,13 +53,14 @@ export class RegexEngine implements IMatcher {
           // Basic validation: Must have at least a title
           if (!title) continue;
 
+          const mediaType = toMediaType(rule.type);
           return {
             success: true,
             seriesName: title.trim(),
-            season: season ? parseInt(season, 10) : 1, // Default to Season 1
+            season: mediaType === 'movie' ? null : (season ? parseInt(season, 10) : 1), // Default to Season 1
             episode: episode ? parseInt(episode, 10) : undefined,
             year: year,
-            mediaType: toMediaType(rule.type),
+            mediaType,
             confidence: 1.0, // Regex matches are considered high confidence if they hit
             source: 'regex'
           };
