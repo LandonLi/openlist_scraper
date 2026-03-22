@@ -138,8 +138,6 @@ export interface OpenListListItem {
   size?: number;
   modified?: string;
   created?: string;
-  updated_at?: string;
-  mtime?: string | number;
 }
 
 export interface OpenListListResponseData {

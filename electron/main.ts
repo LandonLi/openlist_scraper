@@ -214,7 +214,7 @@ function registerIpcHandlers() {
           path: path.posix.join(reqPath, item.name),
           isDir: item.is_dir,
           size: item.size,
-          mtime: item.modified ?? item.updated_at ?? item.mtime ?? item.created,
+          mtime: item.modified,
         }));
         items.sort((a, b) => (a.isDir === b.isDir ? a.name.localeCompare(b.name) : a.isDir ? -1 : 1));
         return { success: true, data: items, currentPath: reqPath };
