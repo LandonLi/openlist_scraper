@@ -5,7 +5,7 @@ export type MediaSearchMode = 'auto' | MediaType;
 export type LogType = 'info' | 'success' | 'error' | 'warn' | 'debug';
 export type LogLevel = 'info' | 'warn' | 'error' | 'debug';
 export type ThemeMode = 'dark' | 'light';
-export type ViewMode = 'grid' | 'list';
+export type ViewMode = 'list';
 export type RuleType = 'tv' | 'movie' | 'anime';
 
 export interface RuleDefinition {
@@ -20,7 +20,6 @@ export interface FileItem {
   isDir: boolean;
   size?: number;
   mtime?: string | number;
-  previewUrl?: string;
 }
 
 export interface SearchResult {
@@ -139,7 +138,6 @@ export interface OpenListListItem {
   size?: number;
   modified?: string;
   created?: string;
-  thumb?: string;
 }
 
 export interface OpenListListResponseData {

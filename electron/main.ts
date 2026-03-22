@@ -1,6 +1,6 @@
 import { app, BrowserWindow, ipcMain, dialog, nativeImage, shell } from 'electron';
 import path from 'path';
-import { fileURLToPath, pathToFileURL } from 'url';
+import { fileURLToPath } from 'url';
 import ElectronStore from 'electron-store';
 import fs from 'fs-extra';
 import type {
@@ -77,8 +77,6 @@ function syncMetadataProvider() {
 }
 
 function registerIpcHandlers() {
-  const imageFilePattern = /\.(jpe?g|png|webp|gif|bmp|avif)$/i;
-
   ipcMain.handle('config:get', (_, key: ConfigKey) => {
     return store.get(key) as ConfigValueMap[typeof key] | undefined;
   });
@@ -185,16 +183,12 @@ function registerIpcHandlers() {
         const data = await Promise.all(items.map(async (item) => {
           const itemPath = path.join(fullPath, item.name);
           const stats = await fs.stat(itemPath);
-          const previewUrl = item.isFile() && imageFilePattern.test(item.name)
-            ? pathToFileURL(itemPath).href
-            : undefined;
           return {
             name: item.name,
             path: itemPath,
             isDir: item.isDirectory(),
             size: item.isFile() ? stats.size : 0,
             mtime: stats.mtime.toISOString(),
-            previewUrl,
           };
         }));
         data.sort((a, b) => (a.isDir === b.isDir ? a.name.localeCompare(b.name) : a.isDir ? -1 : 1));
@@ -221,7 +215,6 @@ function registerIpcHandlers() {
           isDir: item.is_dir,
           size: item.size,
           mtime: item.modified,
-          previewUrl: item.thumb,
         }));
         items.sort((a, b) => (a.isDir === b.isDir ? a.name.localeCompare(b.name) : a.isDir ? -1 : 1));
         return { success: true, data: items, currentPath: reqPath };

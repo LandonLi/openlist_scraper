@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState, type CSSProperties, type ReactNode } from 'react';
 import { useAppStore, LogType, ScrapedMediaRecord } from './stores/appStore';
-import { Settings, Database, Globe, Play, Eye, EyeOff, CheckCircle2, AlertCircle, RefreshCw, Save, ArrowRight, Minus, Square, X, Folder, Network, Zap, File, Clapperboard, ChevronUp, ChevronDown, LayoutGrid, List, Wand2, Sun, Moon, ArrowLeft, CornerLeftUp, Check, Calendar, Clock, Trash2, Download, Sparkles, Copy, ExternalLink } from 'lucide-react';
+import { Settings, Database, Globe, Play, Eye, EyeOff, CheckCircle2, AlertCircle, RefreshCw, Save, ArrowRight, Minus, Square, X, Folder, Network, Zap, File, Clapperboard, ChevronUp, ChevronDown, Wand2, Sun, Moon, ArrowLeft, CornerLeftUp, Check, Calendar, Clock, Trash2, Download, Sparkles, Copy, ExternalLink } from 'lucide-react';
 import clsx from 'clsx';
 import type {
   ScannerRequireConfirmationPayload,
@@ -21,7 +21,6 @@ import type {
   ThemeMode,
   UpdateDownloadedPayload,
   UpdateDownloadProgressPayload,
-  ViewMode,
 } from '../shared/types';
 
 type StatusResult = { success: boolean; message: string };
@@ -172,12 +171,6 @@ const getFileExtension = (name: string) => {
   const ext = name.split('.').pop();
   if (!ext || ext === name) return 'FILE';
   return ext.toUpperCase();
-};
-
-const getThumbSidecarName = (fileName: string) => {
-  const index = fileName.lastIndexOf('.');
-  const base = index > 0 ? fileName.slice(0, index) : fileName;
-  return `${base}-thumb.jpg`;
 };
 
 const getErrorMessage = (error: unknown, fallback = '未知错误') => {
@@ -426,8 +419,6 @@ export default function App() {
   const [fileList, setFileList] = useState<FileItem[]>([]);
   const [loadingFiles, setLoadingFiles] = useState(false);
   const [navHistory, setNavHistory] = useState<string[]>([]);
-  const [thumbnailByPath, setThumbnailByPath] = useState<Record<string, string>>({});
-  const [failedThumbnailPaths, setFailedThumbnailPaths] = useState<Set<string>>(new Set());
 
   // Selection State (Multi-select)
   const [selectedPaths, setSelectedPaths] = useState<Set<string>>(new Set());
@@ -491,7 +482,6 @@ export default function App() {
 
   // UI State
   const [activeUtilityPanel, setActiveUtilityPanel] = useState<'history' | 'logs' | null>(null);
-  const [viewMode, setViewMode] = useState<ViewMode>('list');
 
   // Update State
   const [appVersion, setAppVersion] = useState('');
@@ -538,7 +528,6 @@ export default function App() {
         const sUrl = await window.ipcRenderer.invoke('config:get', 'openlist_url');
         const sToken = await window.ipcRenderer.invoke('config:get', 'openlist_token');
         const vExts = await window.ipcRenderer.invoke('config:get', 'video_extensions');
-        const vMode = await window.ipcRenderer.invoke('config:get', 'view_mode');
         const savedBatchOptions = await window.ipcRenderer.invoke('config:get', 'batch_options');
         const savedTheme = await window.ipcRenderer.invoke('config:get', 'theme');
         const savedLogLevel = await window.ipcRenderer.invoke('config:get', 'log_level');
@@ -557,7 +546,6 @@ export default function App() {
         else setOpenListBatchSizeInput('20');
         if (vExts) { setVideoExtensions(vExts); setVideoExtsInput(vExts); }
         else { setVideoExtsInput('mkv,mp4,avi,mov,iso,rmvb'); }
-        if (vMode) setViewMode(vMode);
         if (savedBatchOptions) setBatchOptions(savedBatchOptions);
         if (savedTheme) setTheme(savedTheme);
         if (savedLogLevel) setLogLevel(savedLogLevel);
@@ -992,8 +980,6 @@ export default function App() {
     setFileList([]);
     setSelectedPaths(new Set());
     setLastClickedIndex(null);
-    setThumbnailByPath({});
-    setFailedThumbnailPaths(new Set());
 
     if (!options?.isBack && currentPath && targetSourceType === sourceType) {
       setNavHistory(prev => [...prev, currentPath]);
@@ -1410,57 +1396,6 @@ export default function App() {
     }
   }, [activeTab, activeUtilityPanel]);
 
-  useEffect(() => {
-    if (viewMode !== 'grid' || fileList.length === 0 || !currentPath) {
-      setThumbnailByPath({});
-      return;
-    }
-
-    let cancelled = false;
-    const config = { localPath, openListUrl, openListToken };
-
-    const resolveThumbnails = async () => {
-      const next: Record<string, string> = {};
-
-      // File cards: use sibling *-thumb.jpg in the same directory.
-      const fileByName = new Map(fileList.map((entry) => [entry.name.toLowerCase(), entry]));
-      for (const entry of fileList) {
-        if (entry.isDir) continue;
-        const sidecar = fileByName.get(getThumbSidecarName(entry.name).toLowerCase());
-        if (!sidecar?.previewUrl) continue;
-        next[entry.path] = sidecar.previewUrl;
-      }
-
-      // Directory cards: probe child directory and prefer poster.jpg.
-      const directories = fileList.filter((entry) => entry.isDir);
-      await Promise.all(directories.map(async (directory) => {
-        try {
-          const result = await window.ipcRenderer.invoke('explorer:list', {
-            type: sourceType,
-            path: directory.path,
-            config,
-          });
-          if (!result.success) return;
-          const posterEntry = result.data.find((entry) => !entry.isDir && entry.name.toLowerCase() === 'poster.jpg');
-          if (!posterEntry?.previewUrl) return;
-          next[directory.path] = posterEntry.previewUrl;
-        } catch {
-          // Ignore and fallback to icon for this card.
-        }
-      }));
-
-      if (!cancelled) {
-        setThumbnailByPath(next);
-      }
-    };
-
-    void resolveThumbnails();
-
-    return () => {
-      cancelled = true;
-    };
-  }, [currentPath, fileList, localPath, openListToken, openListUrl, sourceType, viewMode]);
-
   const isMovieWorkflow = Boolean(
     wizardData.matches && wizardData.matches.some((item) => item.match.mediaType === 'movie')
   );
@@ -1690,15 +1625,6 @@ export default function App() {
                   {isScanning && <span className="w-2 h-2 rounded-full bg-amber-400 animate-pulse" />}
                 </button>
 
-                <div className="flex bg-slate-100 dark:bg-slate-800 rounded-lg p-1 border border-slate-200 dark:border-slate-700 h-9">
-                  <button onClick={() => { setViewMode('grid'); window.ipcRenderer.invoke('config:set', 'view_mode', 'grid'); }} className={clsx("p-1.5 rounded-md transition-all", viewMode === 'grid' ? "bg-white dark:bg-slate-700 text-blue-600 shadow-sm" : "text-slate-400 hover:text-slate-600 dark:hover:text-slate-200")}>
-                    <LayoutGrid className="w-4 h-4" />
-                  </button>
-                  <button onClick={() => { setViewMode('list'); window.ipcRenderer.invoke('config:set', 'view_mode', 'list'); }} className={clsx("p-1.5 rounded-md transition-all", viewMode === 'list' ? "bg-white dark:bg-slate-700 text-blue-600 shadow-sm" : "text-slate-400 hover:text-slate-600 dark:hover:text-slate-200")}>
-                    <List className="w-4 h-4" />
-                  </button>
-                </div>
-
                 {!isConfigured ? (
                   <button onClick={() => { setActiveTab('settings'); setSettingsTab('library'); }} className="h-9 px-4 bg-blue-600 hover:bg-blue-500 text-white rounded-lg text-xs font-bold flex items-center gap-2 shadow-sm transition-all shadow-blue-500/20">
                     配置数据源 <ArrowRight className="w-3 h-3" />
@@ -1764,7 +1690,7 @@ export default function App() {
                     </div>
                   </div>
 
-                  {viewMode === 'list' && fileList.length > 0 && (
+                  {fileList.length > 0 && (
                     <div className="mb-2 grid grid-cols-[minmax(0,1fr)_160px_120px] items-center rounded-lg border border-slate-200/80 dark:border-slate-800 bg-white/80 dark:bg-slate-900/70 px-3 py-2 text-[10px] font-black uppercase tracking-[0.18em] text-slate-400">
                       <span>名称</span>
                       <span>修改时间</span>
@@ -1772,13 +1698,9 @@ export default function App() {
                     </div>
                   )}
 
-                  <div className={clsx(
-                    viewMode === 'grid'
-                      ? "grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 2xl:grid-cols-5 gap-4"
-                      : "flex flex-col gap-1.5"
-                  )}>
+                  <div className="flex flex-col gap-1.5">
                     {fileList.length === 0 && (
-                      <div className={clsx("col-span-full flex flex-col items-center justify-center text-slate-400 gap-3 rounded-2xl border border-dashed border-slate-300 dark:border-slate-700 bg-white/70 dark:bg-slate-900/50", viewMode === 'grid' ? "py-20" : "py-16")}>
+                      <div className="col-span-full flex flex-col items-center justify-center text-slate-400 gap-3 rounded-2xl border border-dashed border-slate-300 dark:border-slate-700 bg-white/70 dark:bg-slate-900/50 py-16">
                         <div className="w-16 h-16 bg-slate-100 dark:bg-slate-800 rounded-full flex items-center justify-center mb-1">
                           <Folder className="w-8 h-8 opacity-60" />
                         </div>
@@ -1789,133 +1711,61 @@ export default function App() {
 
                     {fileList.map((file, i) => {
                       const isSelected = selectedPaths.has(file.path);
-                      const thumbnailUrl = failedThumbnailPaths.has(file.path) ? undefined : thumbnailByPath[file.path];
                       return (
                         <div
                           key={file.path}
                           onClick={(e) => { if (file.isDir) handleNavigate(file.path); else toggleSelection(file.path, i, { ctrlKey: e.ctrlKey, shiftKey: e.shiftKey }); }}
                           className={clsx(
                             "group relative rounded-xl border transition-all duration-200 cursor-pointer select-none",
-                            viewMode === 'grid'
-                              ? "p-3 flex flex-col min-h-[228px]"
-                              : "grid grid-cols-[minmax(0,1fr)_160px_120px] items-center gap-2 px-3 py-2.5",
+                            "grid grid-cols-[minmax(0,1fr)_160px_120px] items-center gap-2 px-3 py-2.5",
                             isSelected
                               ? "bg-blue-50 dark:bg-blue-900/20 border-blue-500/50 shadow-sm ring-1 ring-blue-500/20"
                               : "bg-white dark:bg-slate-900 border-slate-200/90 dark:border-slate-800 hover:border-blue-300 dark:hover:border-blue-700 hover:shadow-sm"
                           )}
                         >
-                          {viewMode === 'grid' ? (
-                            <>
-                              <div className={clsx(
-                                "relative w-full overflow-hidden rounded-lg border",
-                                file.isDir
-                                  ? "aspect-[4/3] bg-blue-50/60 dark:bg-blue-950/40 border-blue-100 dark:border-blue-900/70"
-                                  : "aspect-[16/10] bg-slate-100 dark:bg-slate-800 border-slate-200 dark:border-slate-700"
-                              )}>
-                                {!file.isDir && (
-                                  <div
-                                    className={clsx(
-                                      "absolute top-2 right-2 z-20 w-5 h-5 rounded border flex items-center justify-center transition-all",
-                                      isSelected
-                                        ? "bg-blue-500 border-blue-500"
-                                        : "border-slate-300/90 dark:border-slate-600 bg-white/80 dark:bg-slate-900/80 hover:border-blue-400"
-                                    )}
-                                    onClick={(e) => { e.stopPropagation(); toggleSelection(file.path, i, { ctrlKey: e.ctrlKey, shiftKey: e.shiftKey }); }}
-                                  >
-                                    {isSelected && <Check className="w-3 h-3 text-white" />}
-                                  </div>
+                          <div className="flex items-center gap-2.5 min-w-0 flex-1">
+                            {!file.isDir && (
+                              <div
+                                className={clsx(
+                                  "w-4 h-4 rounded border flex shrink-0 items-center justify-center transition-all",
+                                  isSelected
+                                    ? "bg-blue-500 border-blue-500"
+                                    : "border-slate-300 dark:border-slate-600 hover:border-blue-400 bg-white dark:bg-slate-800"
                                 )}
-
-                                {thumbnailUrl ? (
-                                  <img
-                                    src={thumbnailUrl}
-                                    alt={file.name}
-                                    className="w-full h-full object-cover"
-                                    onError={() => {
-                                      setFailedThumbnailPaths((prev) => {
-                                        const next = new Set(prev);
-                                        next.add(file.path);
-                                        return next;
-                                      });
-                                    }}
-                                  />
-                                ) : (
-                                  <div className="w-full h-full flex items-center justify-center">
-                                    <div className={clsx(
-                                      "w-11 h-11 rounded-xl border flex items-center justify-center",
-                                      file.isDir
-                                        ? "bg-blue-100/80 dark:bg-blue-900/40 border-blue-200 dark:border-blue-800 text-blue-600 dark:text-blue-300"
-                                        : "bg-white/80 dark:bg-slate-900/80 border-slate-200 dark:border-slate-700 text-slate-500 dark:text-slate-300"
-                                    )}>
-                                      {file.isDir ? <Folder className="w-5 h-5" /> : <File className="w-5 h-5" />}
-                                    </div>
-                                  </div>
-                                )}
+                                onClick={(e) => { e.stopPropagation(); toggleSelection(file.path, i, { ctrlKey: e.ctrlKey, shiftKey: e.shiftKey }); }}
+                              >
+                                {isSelected && <Check className="w-3 h-3 text-white" />}
                               </div>
+                            )}
+                            {file.isDir && <div className="w-4 h-4 shrink-0" />}
 
-                              <div className="mt-3 min-w-0">
-                                <div className={clsx("truncate text-sm", file.isDir ? "text-slate-900 dark:text-slate-100 font-bold" : "text-slate-700 dark:text-slate-200 font-medium")}>
-                                  {file.name}
-                                </div>
-                                <div className="mt-1 text-[11px] text-slate-400 truncate">
-                                  {file.isDir ? '文件夹' : getFileExtension(file.name)}
-                                </div>
+                            <div className={clsx(
+                              "w-8 h-8 shrink-0 rounded-lg border flex items-center justify-center",
+                              file.isDir
+                                ? "bg-blue-50 dark:bg-blue-900/20 border-blue-200 dark:border-blue-800 text-blue-600 dark:text-blue-300"
+                                : "bg-slate-100 dark:bg-slate-800 border-slate-200 dark:border-slate-700 text-slate-500 dark:text-slate-300"
+                            )}>
+                              {file.isDir ? <Folder className="w-4 h-4" /> : <File className="w-4 h-4" />}
+                            </div>
+
+                            <div className="min-w-0">
+                              <div className={clsx("truncate text-sm", file.isDir ? "text-slate-900 dark:text-slate-100 font-bold" : "text-slate-700 dark:text-slate-200 font-medium")}>
+                                {file.name}
                               </div>
-                            </>
-                          ) : (
-                            <div className="flex items-center gap-2.5 min-w-0 flex-1">
-                              {!file.isDir && (
-                                <div
-                                  className={clsx(
-                                    "w-4 h-4 rounded border flex shrink-0 items-center justify-center transition-all",
-                                    isSelected
-                                      ? "bg-blue-500 border-blue-500"
-                                      : "border-slate-300 dark:border-slate-600 hover:border-blue-400 bg-white dark:bg-slate-800"
-                                  )}
-                                  onClick={(e) => { e.stopPropagation(); toggleSelection(file.path, i, { ctrlKey: e.ctrlKey, shiftKey: e.shiftKey }); }}
-                                >
-                                  {isSelected && <Check className="w-3 h-3 text-white" />}
-                                </div>
-                              )}
-                              {file.isDir && <div className="w-4 h-4 shrink-0" />}
-
-                              <div className={clsx(
-                                "w-8 h-8 shrink-0 rounded-lg border flex items-center justify-center",
-                                file.isDir
-                                  ? "bg-blue-50 dark:bg-blue-900/20 border-blue-200 dark:border-blue-800 text-blue-600 dark:text-blue-300"
-                                  : "bg-slate-100 dark:bg-slate-800 border-slate-200 dark:border-slate-700 text-slate-500 dark:text-slate-300"
-                              )}>
-                                {file.isDir ? <Folder className="w-4 h-4" /> : <File className="w-4 h-4" />}
-                              </div>
-
-                              <div className="min-w-0">
-                                <div className={clsx("truncate text-sm", file.isDir ? "text-slate-900 dark:text-slate-100 font-bold" : "text-slate-700 dark:text-slate-200 font-medium")}>
-                                  {file.name}
-                                </div>
-                                <div className="text-[11px] text-slate-400 truncate">
-                                  {file.isDir ? '文件夹' : getFileExtension(file.name)}
-                                </div>
+                              <div className="text-[11px] text-slate-400 truncate">
+                                {file.isDir ? '文件夹' : getFileExtension(file.name)}
                               </div>
                             </div>
-                          )}
+                          </div>
 
-                          {viewMode === 'list' && (
-                            <>
-                              <div className="text-[11px] text-slate-400 font-medium truncate">
-                                {file.isDir ? '--' : formatExplorerMtime(file.mtime)}
-                              </div>
-                              <div className="text-[11px] text-slate-500 dark:text-slate-400 text-right font-semibold tabular-nums">
-                                {file.isDir ? '--' : formatFileSize(file.size)}
-                              </div>
-                            </>
-                          )}
-
-                          {viewMode === 'grid' && (
-                            <div className="mt-auto pt-3 flex items-center justify-between text-[10px] uppercase tracking-[0.14em]">
-                              <span className="text-slate-400">{file.isDir ? 'Folder' : getFileExtension(file.name)}</span>
-                              <span className="text-slate-500 dark:text-slate-400 font-semibold tabular-nums">{file.isDir ? '--' : formatFileSize(file.size)}</span>
+                          <>
+                            <div className="text-[11px] text-slate-400 font-medium truncate">
+                              {file.isDir ? '--' : formatExplorerMtime(file.mtime)}
                             </div>
-                          )}
+                            <div className="text-[11px] text-slate-500 dark:text-slate-400 text-right font-semibold tabular-nums">
+                              {file.isDir ? '--' : formatFileSize(file.size)}
+                            </div>
+                          </>
                         </div>
                       );
                     })}
