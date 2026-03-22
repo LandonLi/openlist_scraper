@@ -21,7 +21,7 @@ import type {
 } from '../../shared/types';
 import { getErrorMessage } from '../utils/errors';
 
-type CachedSeriesInfo = { id: string; poster?: string };
+type CachedSeriesInfo = { id: string; poster?: string; mediaType?: MediaType };
 type UserConfirmationResult = {
   id: string;
   poster?: string;
@@ -283,10 +283,11 @@ export class ScannerService {
     items: EpisodeMatchItem[],
     skipMetadata = false,
   ) {
-    let seriesInfo = this.showMetadataCache.get(seriesName);
+    const initialSearchMode: MediaSearchMode = this.inferSearchMode(items);
+    let seriesInfo = initialSearchMode === 'movie' ? undefined : this.showMetadataCache.get(seriesName);
     let currentSearchName = seriesName;
     let confirmedSeriesName = seriesName; // 保存用户确认的剧集名称
-    let currentSearchMode: MediaSearchMode = this.inferSearchMode(items);
+    let currentSearchMode: MediaSearchMode = initialSearchMode;
 
     // Loop until we have series info or user cancels
     while (!seriesInfo) {
@@ -314,24 +315,23 @@ export class ScannerService {
       }
 
       if (confirmed.id) {
-        if (confirmed.mediaType === 'movie') {
-          const notice = '已选择电影结果。当前执行流程仅支持电视剧元数据，请切换类型继续。';
-          this.log(notice, 'warn');
-          this.sendConfirmationPrompt(currentSearchName, results, currentSearchMode, notice);
-          return;
-        }
-
-        seriesInfo = { id: confirmed.id, poster: confirmed.poster };
+        seriesInfo = {
+          id: confirmed.id,
+          poster: confirmed.poster,
+          mediaType: confirmed.mediaType ?? (currentSearchMode === 'movie' ? 'movie' : 'tv'),
+        };
         // 如果用户确认了剧集名称,使用确认的名称
         if (confirmed.confirmedName) {
           confirmedSeriesName = confirmed.confirmedName;
           this.log(`使用用户确认的剧集名称: ${confirmedSeriesName}`, 'debug');
         }
-        // 使用确认的名称作为缓存键
-        this.showMetadataCache.set(confirmedSeriesName, seriesInfo);
-        // 如果确认的名称与原始名称不同,也缓存原始名称以避免重复搜索
-        if (confirmedSeriesName !== seriesName) {
-          this.showMetadataCache.set(seriesName, seriesInfo);
+        if (seriesInfo.mediaType !== 'movie') {
+          // 使用确认的名称作为缓存键
+          this.showMetadataCache.set(confirmedSeriesName, seriesInfo);
+          // 如果确认的名称与原始名称不同,也缓存原始名称以避免重复搜索
+          if (confirmedSeriesName !== seriesName) {
+            this.showMetadataCache.set(seriesName, seriesInfo);
+          }
         }
       } else {
         return; // Should be covered by !confirmed check, but just safe guard
@@ -339,9 +339,43 @@ export class ScannerService {
     }
 
     const tmdbId = seriesInfo.id;
+    const mediaType = seriesInfo.mediaType ?? 'tv';
 
     let matchedItems: EpisodeMatchItem[];
-    if (skipMetadata) {
+    if (mediaType === 'movie') {
+      const movieDetails = await this.metadataProvider.getMovieDetails(tmdbId);
+      if (!movieDetails) {
+        this.log(`未获取到电影详情: ${confirmedSeriesName}`, 'error');
+        return;
+      }
+
+      matchedItems = items.map((item) => ({
+        ...item,
+        tmdbId,
+        match: {
+          ...item.match,
+          mediaType: 'movie',
+          season: 0,
+          episode: 0,
+          originalEpisode: 0,
+          totalEpisodes: 1,
+        },
+        metadata: {
+          id: movieDetails.id,
+          seasonNumber: 0,
+          episodeNumber: 0,
+          title: movieDetails.title,
+          overview: movieDetails.overview,
+          airDate: movieDetails.releaseDate,
+          runtime: movieDetails.runtime,
+          stillPath: undefined,
+        }
+      }));
+
+      if (movieDetails.posterPath) {
+        seriesInfo.poster = movieDetails.posterPath;
+      }
+    } else if (skipMetadata) {
       // 跳过元数据获取，但仍需获取季总集数用于文件名格式
       const seasonsInGroup = new Set<number>(items.map((item) => item.match.season ?? 1));
       const seasonEpisodeCounts: Map<number, number> = new Map();
@@ -448,7 +482,8 @@ export class ScannerService {
   ) {
     const renameObjects: BatchRenameItem[] = [];
     const itemsToProcess = selectedIndices.map(idx => matchedItems[idx]);
-    const totalSteps = itemsToProcess.length * ((options.writeNfo ? 1 : 0) + (options.writeStill ? 1 : 0)) + (options.writePoster ? 1 : 0) + (options.rename ? 1 : 0);
+    const isMovieFlow = itemsToProcess.some((item) => item.match.mediaType === 'movie');
+    const totalSteps = itemsToProcess.length * ((options.writeNfo ? 1 : 0) + ((options.writeStill && !isMovieFlow) ? 1 : 0)) + (options.writePoster ? 1 : 0) + (options.rename ? 1 : 0);
     let currentStep = 0;
     const sendProgress = (msg: string) => {
       const percent = Math.round((currentStep / totalSteps) * 100);
@@ -457,14 +492,23 @@ export class ScannerService {
 
     if (options.rename) {
       sendProgress('正在重命名文件...');
-      for (const item of itemsToProcess) {
+      for (let i = 0; i < itemsToProcess.length; i++) {
+        const item = itemsToProcess[i];
         if (this.cancelRequested) return;
         if (item.metadata) {
           const fileExt = path.posix.extname(item.file.name);
-          // 根据总集数动态决定集数位数
-          const episodeDigits = Math.max(2, String(item.match.totalEpisodes || 0).length);
-          console.log(`[重命名] S${item.match.season}E${item.match.episode} - totalEpisodes: ${item.match.totalEpisodes}, digits: ${episodeDigits}`);
-          const newName = `${seriesName} - S${String(item.match.season).padStart(2, '0')}E${String(item.match.episode).padStart(episodeDigits, '0')} - ${item.metadata.title}${fileExt}`;
+          let newName = '';
+
+          if (item.match.mediaType === 'movie') {
+            const year = item.metadata.airDate?.slice(0, 4);
+            const suffix = itemsToProcess.length > 1 ? ` - ${i + 1}` : '';
+            newName = `${item.metadata.title}${year ? ` (${year})` : ''}${suffix}${fileExt}`;
+          } else {
+            // 根据总集数动态决定集数位数
+            const episodeDigits = Math.max(2, String(item.match.totalEpisodes || 0).length);
+            console.log(`[重命名] S${item.match.season}E${item.match.episode} - totalEpisodes: ${item.match.totalEpisodes}, digits: ${episodeDigits}`);
+            newName = `${seriesName} - S${String(item.match.season).padStart(2, '0')}E${String(item.match.episode).padStart(episodeDigits, '0')} - ${item.metadata.title}${fileExt}`;
+          }
           if (item.file.name !== newName) renameObjects.push({ src_name: item.file.name, new_name: newName });
         }
       }
@@ -504,20 +548,29 @@ export class ScannerService {
       const finalBaseName = path.posix.basename(item.file.name, fileExt);
 
       if (options.writeNfo && item.metadata) {
-        sendProgress(`写入 NFO: 第 ${item.match.episode} 集`);
-        const nfoContent = `<? xml version = "1.0" encoding = "UTF-8" standalone = "yes" ?>
-  <episodedetails>
-  <title>${item.metadata.title} </title>
-    < season > ${item.match.season} </season>
-      < episode > ${item.match.episode} </episode>
-        < plot > ${item.metadata.overview} </plot>
-          < aired > ${item.metadata.airDate || ''} </aired>
-            < runtime > ${item.metadata.runtime || ''} </runtime>
-              </episodedetails>`;
+        sendProgress(item.match.mediaType === 'movie' ? '写入电影 NFO' : `写入 NFO: 第 ${item.match.episode} 集`);
+        const nfoContent = item.match.mediaType === 'movie'
+          ? `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<movie>
+  <title>${item.metadata.title}</title>
+  <plot>${item.metadata.overview || ''}</plot>
+  <year>${item.metadata.airDate?.slice(0, 4) || ''}</year>
+  <premiered>${item.metadata.airDate || ''}</premiered>
+  <runtime>${item.metadata.runtime || ''}</runtime>
+</movie>`
+          : `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<episodedetails>
+  <title>${item.metadata.title}</title>
+  <season>${item.match.season}</season>
+  <episode>${item.match.episode}</episode>
+  <plot>${item.metadata.overview || ''}</plot>
+  <aired>${item.metadata.airDate || ''}</aired>
+  <runtime>${item.metadata.runtime || ''}</runtime>
+</episodedetails>`;
         await source.writeFile(path.posix.join(fileDir, `${finalBaseName}.nfo`), nfoContent);
         currentStep++;
       }
-      if (options.writeStill && item.metadata?.stillPath) {
+      if (!isMovieFlow && options.writeStill && item.metadata?.stillPath) {
         sendProgress(`下载剧照: 第 ${item.match.episode} 集`);
         const imgBuffer = await this.downloadImage(item.metadata.stillPath);
         if (imgBuffer) await source.writeFile(path.posix.join(fileDir, `${finalBaseName}-thumb.jpg`), imgBuffer);
@@ -539,13 +592,13 @@ export class ScannerService {
         filePath: item.file.path,
         sourceId: source.id,
         seriesName,
-        season: item.match.season ?? 1,
-        episode: item.match.episode ?? 1,
+        season: item.match.mediaType === 'movie' ? 0 : (item.match.season ?? 1),
+        episode: item.match.mediaType === 'movie' ? 0 : (item.match.episode ?? 1),
         tmdbId: item.tmdbId,
         episodeTitle: item.metadata.title,
         overview: item.metadata.overview,
         poster: seriesInfo.poster,
-        still: item.metadata.stillPath,
+        still: item.match.mediaType === 'movie' ? undefined : item.metadata.stillPath,
         airDate: item.metadata.airDate,
         runtime: item.metadata.runtime,
       });
