@@ -16,6 +16,8 @@ import type {
   EpisodeConfirmationPayload,
   EpisodeMatchItem,
   LogLevel,
+  MediaSearchMode,
+  MediaType,
 } from '../../shared/types';
 import { getErrorMessage } from '../utils/errors';
 
@@ -25,6 +27,8 @@ type UserConfirmationResult = {
   poster?: string;
   newName?: string;
   confirmedName?: string;
+  mediaType?: MediaType;
+  searchMode?: MediaSearchMode;
 };
 
 export class ScannerService {
@@ -34,6 +38,7 @@ export class ScannerService {
   private dbService: DatabaseService;
   private mainWindow: BrowserWindow | null = null;
   private _isScanning: boolean = false;
+  private cancelRequested: boolean = false;
 
   private showMetadataCache: Map<string, CachedSeriesInfo> = new Map();
   private logLevel: LogLevel = 'info';
@@ -107,27 +112,54 @@ export class ScannerService {
   private async requestUserConfirmation(
     detectedName: string,
     results: SearchResult[],
+    searchMode: MediaSearchMode,
   ): Promise<UserConfirmationResult | null> {
     if (!this.mainWindow) return null;
     return new Promise((resolve) => {
-      setTimeout(() => {
-        this.mainWindow?.webContents.send('scanner-require-confirmation', { detectedName, results });
-      }, 200);
+      this.sendConfirmationPrompt(detectedName, results, searchMode);
       ipcMain.once('scanner-confirm-response', (_event, response: ScannerConfirmResponsePayload) => {
-        // If user provided a new name to search
-        if (response.newName) {
-          resolve({ id: '', newName: response.newName });
+        const trimmedNewName = response.newName?.trim();
+        const modeChanged = Boolean(response.searchMode && response.searchMode !== searchMode);
+
+        // User requests re-search (new name and/or mode)
+        if (trimmedNewName || modeChanged) {
+          resolve({
+            id: '',
+            newName: trimmedNewName,
+            searchMode: response.searchMode,
+          });
           return;
         }
 
-        const selected = results.find(r => r.id === response.seriesId);
+        const selected = results.find((r) => {
+          if (r.id !== response.seriesId) return false;
+          if (!response.mediaType) return true;
+          return r.mediaType === response.mediaType;
+        });
         resolve(selected ? {
           id: selected.id,
           poster: selected.poster,
-          confirmedName: response.seriesName || selected.title
+          confirmedName: response.seriesName || selected.title,
+          mediaType: selected.mediaType,
         } : null);
       });
     });
+  }
+
+  private sendConfirmationPrompt(
+    detectedName: string,
+    results: SearchResult[],
+    searchMode: MediaSearchMode,
+    notice?: string,
+  ) {
+    setTimeout(() => {
+      this.mainWindow?.webContents.send('scanner-require-confirmation', {
+        detectedName,
+        results,
+        searchMode,
+        notice,
+      });
+    }, 100);
   }
 
   private async requestEpisodesConfirmation(
@@ -165,6 +197,7 @@ export class ScannerService {
   }
 
   private async recursiveList(source: IMediaSource, dirPath: string): Promise<FileItem[]> {
+    if (this.cancelRequested) return [];
     let results: FileItem[] = [];
     try {
       const items = await source.listDir(dirPath);
@@ -184,6 +217,7 @@ export class ScannerService {
   async identifySingleFile(source: IMediaSource, targetPath: string, videoExtensions: string) {
     if (this._isScanning) return;
     this._isScanning = true;
+    this.cancelRequested = false;
     this.log(`正在识别上下文: ${targetPath} `);
 
     try {
@@ -232,7 +266,11 @@ export class ScannerService {
       await this.processSeriesGroup(source, resolveResult.seriesName, items);
 
     } catch (error) {
-      this.log(`识别失败: ${getErrorMessage(error)} `, 'error');
+      if (this.isCancelledError(error)) {
+        this.log('任务已取消。', 'warn');
+      } else {
+        this.log(`识别失败: ${getErrorMessage(error)} `, 'error');
+      }
     } finally {
       this._isScanning = false;
       this.mainWindow?.webContents.send('scanner-finished');
@@ -248,23 +286,41 @@ export class ScannerService {
     let seriesInfo = this.showMetadataCache.get(seriesName);
     let currentSearchName = seriesName;
     let confirmedSeriesName = seriesName; // 保存用户确认的剧集名称
+    let currentSearchMode: MediaSearchMode = this.inferSearchMode(items);
 
     // Loop until we have series info or user cancels
     while (!seriesInfo) {
-      const results = await this.metadataProvider.searchTVShow(currentSearchName);
+      if (this.cancelRequested) return;
+      const results = await this.metadataProvider.search(currentSearchName, currentSearchMode);
       // Always show confirmation for single file identification to be safe
-      const confirmed = await this.requestUserConfirmation(currentSearchName, results);
+      const confirmed = await this.requestUserConfirmation(currentSearchName, results, currentSearchMode);
 
       if (!confirmed) return; // Cancelled
 
       if (confirmed.newName) {
         // User requesting re-search
         currentSearchName = confirmed.newName;
+        if (confirmed.searchMode) {
+          currentSearchMode = confirmed.searchMode;
+        }
         this.log(`用户请求手动修正剧名: ${currentSearchName}, 正在重新搜索...`, 'info');
         continue;
       }
 
+      if (confirmed.searchMode && confirmed.searchMode !== currentSearchMode) {
+        currentSearchMode = confirmed.searchMode;
+        this.log(`用户切换搜索类型为: ${currentSearchMode}`, 'info');
+        continue;
+      }
+
       if (confirmed.id) {
+        if (confirmed.mediaType === 'movie') {
+          const notice = '已选择电影结果。当前执行流程仅支持电视剧元数据，请切换类型继续。';
+          this.log(notice, 'warn');
+          this.sendConfirmationPrompt(currentSearchName, results, currentSearchMode, notice);
+          return;
+        }
+
         seriesInfo = { id: confirmed.id, poster: confirmed.poster };
         // 如果用户确认了剧集名称,使用确认的名称
         if (confirmed.confirmedName) {
@@ -291,6 +347,7 @@ export class ScannerService {
       const seasonEpisodeCounts: Map<number, number> = new Map();
 
       for (const seasonNum of seasonsInGroup) {
+        if (this.cancelRequested) return;
         try {
           const episodes = await this.metadataProvider.getSeasonDetails(tmdbId, seasonNum);
           seasonEpisodeCounts.set(seasonNum, episodes.length);
@@ -315,6 +372,7 @@ export class ScannerService {
       const seasonEpisodeCounts: Map<number, number> = new Map();  // 保存每季的总集数
 
       for (const seasonNum of seasonsInGroup) {
+        if (this.cancelRequested) return;
         this.log(`正在获取第 ${seasonNum} 季的元数据...`);
         const episodes = await this.metadataProvider.getSeasonDetails(tmdbId, seasonNum);
         seasonCache.set(seasonNum, episodes);
@@ -323,6 +381,7 @@ export class ScannerService {
 
       matchedItems = [];
       for (const item of items) {
+        if (this.cancelRequested) return;
         const currentSeason = item.match.season ?? 1;
         const seasonData = seasonCache.get(currentSeason) || [];
         const totalEpisodes = seasonEpisodeCounts.get(currentSeason) || 0;  // 获取总集数
@@ -350,6 +409,7 @@ export class ScannerService {
 
     const { confirmed, options, selectedIndices, updatedMatches } =
       await this.requestEpisodesConfirmation(confirmedSeriesName, matchedItems);
+    if (this.cancelRequested) return;
     if (confirmed && selectedIndices.length > 0) {
       await this.executeBatch(
         source,
@@ -360,6 +420,22 @@ export class ScannerService {
         seriesInfo,
       );
     }
+  }
+
+  private inferSearchMode(items: EpisodeMatchItem[]): MediaSearchMode {
+    const mediaTypeSet = new Set<MediaType>();
+    for (const item of items) {
+      const mediaType = item.match.mediaType;
+      if (mediaType) {
+        mediaTypeSet.add(mediaType);
+      }
+    }
+
+    if (mediaTypeSet.size === 1) {
+      return Array.from(mediaTypeSet)[0];
+    }
+
+    return 'auto';
   }
 
   private async executeBatch(
@@ -382,6 +458,7 @@ export class ScannerService {
     if (options.rename) {
       sendProgress('正在重命名文件...');
       for (const item of itemsToProcess) {
+        if (this.cancelRequested) return;
         if (item.metadata) {
           const fileExt = path.posix.extname(item.file.name);
           // 根据总集数动态决定集数位数
@@ -407,6 +484,7 @@ export class ScannerService {
         };
 
         const success = await source.batchRename(commonDir, renameObjects, batchSize, onRenameProgress);
+        if (this.cancelRequested) return;
         if (success) {
           for (const item of itemsToProcess) {
             const renameInfo = renameObjects.find(r => r.src_name === item.file.name);
@@ -419,6 +497,7 @@ export class ScannerService {
 
     const writtenPosters = new Set<string>();
     for (const item of itemsToProcess) {
+      if (this.cancelRequested) return;
       await new Promise(resolve => setTimeout(resolve, 50));
       const fileDir = path.posix.dirname(item.file.path);
       const fileExt = path.posix.extname(item.file.name);
@@ -453,6 +532,7 @@ export class ScannerService {
     }
 
     for (const item of itemsToProcess) {
+      if (this.cancelRequested) return;
       if (!item.metadata) continue;
 
       this.dbService.saveMedia({
@@ -479,6 +559,7 @@ export class ScannerService {
   async scanSelectedFiles(source: IMediaSource, selectedPaths: string[], videoExtensions: string) {
     if (this._isScanning) return;
     this._isScanning = true;
+    this.cancelRequested = false;
     this.log(`开始扫描 ${selectedPaths.length} 个选定文件...`);
 
     try {
@@ -514,7 +595,11 @@ export class ScannerService {
       await this.processFileList(source, fileItems, videoExtensions, true);
 
     } catch (error) {
-      this.log(`扫描失败: ${getErrorMessage(error)}`, 'error');
+      if (this.isCancelledError(error)) {
+        this.log('任务已取消。', 'warn');
+      } else {
+        this.log(`扫描失败: ${getErrorMessage(error)}`, 'error');
+      }
     } finally {
       this._isScanning = false;
       this.mainWindow?.webContents.send('scanner-finished');
@@ -527,14 +612,20 @@ export class ScannerService {
       return;
     }
     this._isScanning = true;
+    this.cancelRequested = false;
     this.log(`开始扫描源: ${source.name} 路径: ${startPath}`);
 
     try {
       this.log('正在遍历目录结构...');
       const allFiles = await this.recursiveList(source, startPath);
+      if (this.cancelRequested) return;
       await this.processFileList(source, allFiles, videoExtensions);
     } catch (error) {
-      this.log(`扫描失败: ${getErrorMessage(error)}`, 'error');
+      if (this.isCancelledError(error)) {
+        this.log('任务已取消。', 'warn');
+      } else {
+        this.log(`扫描失败: ${getErrorMessage(error)}`, 'error');
+      }
     }
     finally { this._isScanning = false; this.log('扫描完成'); this.mainWindow?.webContents.send('scanner-finished'); }
   }
@@ -563,10 +654,12 @@ export class ScannerService {
 
     // Second pass: Process each directory group
     for (const [dir, filesInDir] of dirGroups.entries()) {
+      if (this.cancelRequested) return;
       const dirResults: EpisodeMatchItem[] = [];
       const unmatchedFiles: FileItem[] = [];
 
       for (const file of filesInDir) {
+        if (this.cancelRequested) return;
         const match = await this.regexEngine.match(file.name);
         if (match.success) {
           dirResults.push({
@@ -633,6 +726,7 @@ export class ScannerService {
           } else {
             // Fallback to individual LLM calls
             for (const unmatched of unmatchedFiles) {
+              if (this.cancelRequested) return;
               this.log(`正则匹配失败: ${unmatched.name}, 正在请求 LLM 识别...`);
               const match = await this.llmEngine.match(unmatched.name);
               dirResults.push({ file: unmatched, match });
@@ -660,6 +754,7 @@ export class ScannerService {
     }
 
     for (const [seriesName, items] of groups.entries()) {
+      if (this.cancelRequested) return;
       // 检测并清理未识别文件的分组名
       let cleanSeriesName = seriesName;
       if (seriesName.startsWith('[未识别] ')) {
@@ -667,5 +762,15 @@ export class ScannerService {
       }
       await this.processSeriesGroup(source, cleanSeriesName, items, skipMetadata);
     }
+  }
+
+  requestCancel() {
+    if (!this._isScanning) return;
+    this.cancelRequested = true;
+    this.log('收到停止任务请求，将尽快中止当前流程。', 'warn');
+  }
+
+  private isCancelledError(error: unknown): boolean {
+    return getErrorMessage(error) === 'SCAN_CANCELLED';
   }
 }

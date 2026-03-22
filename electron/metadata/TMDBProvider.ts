@@ -2,6 +2,8 @@ import { FetchClient } from '../utils/FetchClient';
 import { IMetadataProvider, SearchResult, EpisodeData } from '../interfaces/IMetadataProvider';
 import { ProxyHelper } from '../utils/ProxyHelper';
 import type {
+  MediaSearchMode,
+  MediaType,
   TmdbEpisodeItem,
   TmdbSearchResponse,
   TmdbSeasonResponse,
@@ -70,36 +72,51 @@ export class TMDBProvider implements IMetadataProvider {
     }
   }
 
-  async searchTVShow(query: string): Promise<SearchResult[]> {
+  async search(query: string, mode: MediaSearchMode = 'auto'): Promise<SearchResult[]> {
     try {
       const seen = new Set<string>();
       const aggregatedResults: SearchResult[] = [];
+      const mediaTypes: MediaType[] = mode === 'auto' ? ['tv', 'movie'] : [mode];
 
-      for (const language of this.fallbackLanguages) {
-        for (const candidate of this.buildSearchCandidates(query)) {
-          const response = await this.api.get<TmdbSearchResponse>('/search/tv', {
-            params: { query: candidate, language },
-          });
+      for (const mediaType of mediaTypes) {
+        for (const language of this.fallbackLanguages) {
+          for (const candidate of this.buildSearchCandidates(query)) {
+            const response = await this.api.get<TmdbSearchResponse>(`/search/${mediaType}`, {
+              params: { query: candidate, language },
+            });
 
-          const results = response.data.results.map((item) => ({
-            id: item.id.toString(),
-            title: item.name,
-            originalTitle: item.original_name,
-            year: item.first_air_date ? item.first_air_date.substring(0, 4) : undefined,
-            poster: item.poster_path ? `${this.imageBaseUrl}${item.poster_path}` : undefined,
-            overview: item.overview,
-            provider: 'tmdb',
-          }));
+            const results = response.data.results.map((item) => {
+              const title = mediaType === 'movie' ? (item.title || '') : (item.name || '');
+              const originalTitle = mediaType === 'movie'
+                ? item.original_title
+                : item.original_name;
+              const yearSource = mediaType === 'movie'
+                ? item.release_date
+                : item.first_air_date;
 
-          for (const result of results) {
-            if (!seen.has(result.id)) {
-              seen.add(result.id);
-              aggregatedResults.push(result);
+              return {
+                id: item.id.toString(),
+                title,
+                originalTitle,
+                year: yearSource ? yearSource.substring(0, 4) : undefined,
+                poster: item.poster_path ? `${this.imageBaseUrl}${item.poster_path}` : undefined,
+                overview: item.overview,
+                provider: 'tmdb',
+                mediaType,
+              };
+            }).filter((item) => Boolean(item.title));
+
+            for (const result of results) {
+              const dedupeKey = `${result.mediaType}:${result.id}`;
+              if (!seen.has(dedupeKey)) {
+                seen.add(dedupeKey);
+                aggregatedResults.push(result);
+              }
             }
-          }
 
-          if (aggregatedResults.length > 0) {
-            return aggregatedResults;
+            if (aggregatedResults.length > 0) {
+              return aggregatedResults;
+            }
           }
         }
       }

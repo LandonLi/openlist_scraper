@@ -1,4 +1,6 @@
 export type SourceType = 'local' | 'openlist';
+export type MediaType = 'tv' | 'movie';
+export type MediaSearchMode = 'auto' | MediaType;
 
 export type LogType = 'info' | 'success' | 'error' | 'warn' | 'debug';
 export type LogLevel = 'info' | 'warn' | 'error' | 'debug';
@@ -28,6 +30,7 @@ export interface SearchResult {
   poster?: string;
   overview?: string;
   provider: string;
+  mediaType: MediaType;
 }
 
 export interface EpisodeData {
@@ -57,6 +60,7 @@ export interface MatchResult {
   season?: number | null;
   episode?: number | null;
   year?: string;
+  mediaType?: MediaType;
   confidence?: number;
   source: MatchSource;
 }
@@ -138,9 +142,13 @@ export interface OpenListResponse<TData = unknown> {
 
 export interface TmdbSearchResultItem {
   id: number;
-  name: string;
+  media_type?: MediaType;
+  name?: string;
+  title?: string;
   original_name?: string;
+  original_title?: string;
   first_air_date?: string;
+  release_date?: string;
   poster_path?: string | null;
   overview?: string;
 }
