@@ -198,6 +198,10 @@ This repository uses a lightweight GitHub-first workflow for bug fixes, release 
 ## Practical Rules
 
 - Prefer verified fixes over speculative fixes.
+- OpenList API documentation source of truth:
+  - index: `https://fox.oplist.org/llms.txt`
+  - when confirming OpenList API request/response fields (for example `/api/fs/list`), always resolve and read the linked OpenList docs from this index first.
+  - do not guess field names or semantics when implementing OpenList integration; if docs are unclear, pause and confirm with the user.
 - After manual user testing succeeds, follow through and complete the GitHub bookkeeping instead of stopping at code changes.
 - If a release has already shipped, record follow-up work as new issues instead of mutating the meaning of the shipped issue.
 - When cleaning branches after merge or release:
