@@ -315,7 +315,7 @@ const MediaHistoryItem = ({
                   type="button"
                   onClick={(event) => {
                     event.stopPropagation();
-                    window.open(tmdbUrl, '_blank', 'noopener,noreferrer');
+                    void window.ipcRenderer.invoke('system:openExternal', tmdbUrl);
                   }}
                   className="opacity-0 group-hover:opacity-100 focus-visible:opacity-100 h-7 w-7 rounded-lg border border-slate-200 dark:border-slate-700 bg-white/90 dark:bg-slate-900/90 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 transition-all flex items-center justify-center"
                   title="打开 TMDB 页面"
