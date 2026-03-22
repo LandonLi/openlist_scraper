@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain, dialog, nativeImage } from 'electron';
+import { app, BrowserWindow, ipcMain, dialog, nativeImage, shell } from 'electron';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import ElectronStore from 'electron-store';
@@ -229,6 +229,16 @@ function registerIpcHandlers() {
     if (!win) return null;
     const { canceled, filePaths } = await dialog.showOpenDialog(win, { properties: ['openDirectory'] });
     return canceled ? null : filePaths[0];
+  });
+
+  ipcMain.handle('system:openExternal', async (_, url: string) => {
+    if (!/^https?:\/\//i.test(url)) return false;
+    try {
+      await shell.openExternal(url);
+      return true;
+    } catch {
+      return false;
+    }
   });
 
   ipcMain.on('window:minimize', () => win?.minimize());

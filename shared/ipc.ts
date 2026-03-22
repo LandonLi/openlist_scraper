@@ -190,6 +190,7 @@ export interface WindowIpcRenderer {
   invoke(channel: 'scanner:scan-selected', request: ScanSelectedRequest): Promise<AsyncResult<Record<string, never>>>;
   invoke(channel: 'scanner:smart-identify', request: SmartIdentifyRequest): Promise<SmartIdentifyResponse>;
   invoke(channel: 'scanner:start', request: ScanSourceRequest): Promise<AsyncResult<Record<string, never>>>;
+  invoke(channel: 'system:openExternal', url: string): Promise<boolean>;
   invoke(channel: 'tmdb:test', token: string): Promise<AsyncResult<Record<string, never>>>;
   invoke(channel: 'update:check'): Promise<CheckUpdateResult>;
   invoke(channel: 'update:download'): Promise<DownloadUpdateResult>;

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState, type CSSProperties, type ReactNode } from 'react';
 import { useAppStore, LogType, ScrapedMediaRecord } from './stores/appStore';
-import { Settings, Database, Globe, Play, Eye, EyeOff, CheckCircle2, AlertCircle, RefreshCw, Save, ArrowRight, Minus, Square, X, Folder, Network, Zap, File, Clapperboard, ChevronUp, ChevronDown, LayoutGrid, List, Wand2, Sun, Moon, ArrowLeft, CornerLeftUp, Check, Calendar, Clock, Trash2, Download, Sparkles } from 'lucide-react';
+import { Settings, Database, Globe, Play, Eye, EyeOff, CheckCircle2, AlertCircle, RefreshCw, Save, ArrowRight, Minus, Square, X, Folder, Network, Zap, File, Clapperboard, ChevronUp, ChevronDown, LayoutGrid, List, Wand2, Sun, Moon, ArrowLeft, CornerLeftUp, Check, Calendar, Clock, Trash2, Download, Sparkles, Copy, ExternalLink } from 'lucide-react';
 import clsx from 'clsx';
 import type {
   ScannerRequireConfirmationPayload,
@@ -120,6 +120,39 @@ const basename = (input: string) => {
   return normalized.split('/').filter(Boolean).pop() || input;
 };
 
+const isAbsoluteLocalPath = (value: string) => /^[A-Za-z]:[\\/]/.test(value) || value.startsWith('\\\\');
+
+const resolveHistoryPath = (rawPath: string, sourceType: 'local' | 'openlist', localRootPath: string) => {
+  if (sourceType === 'openlist') {
+    const normalized = rawPath.replace(/\\/g, '/');
+    return normalized.startsWith('/') ? normalized : `/${normalized}`;
+  }
+
+  if (isAbsoluteLocalPath(rawPath)) return rawPath;
+  if (!localRootPath) return rawPath;
+
+  const normalizedRoot = localRootPath.replace(/[\\/]+$/, '');
+  const normalizedRelative = rawPath.replace(/^[/\\]+/, '');
+  return `${normalizedRoot}\\${normalizedRelative.replace(/[\\/]+/g, '\\')}`;
+};
+
+const getHistoryParentPath = (targetPath: string, sourceType: 'local' | 'openlist') => {
+  if (sourceType === 'openlist') {
+    const normalized = targetPath.replace(/\\/g, '/').replace(/\/+$/, '');
+    if (!normalized || normalized === '/') return '/';
+    const index = normalized.lastIndexOf('/');
+    if (index <= 0) return '/';
+    return normalized.slice(0, index);
+  }
+
+  const normalized = targetPath.replace(/[\\/]+$/, '');
+  const index = Math.max(normalized.lastIndexOf('\\'), normalized.lastIndexOf('/'));
+  if (index < 0) return normalized;
+  const parent = normalized.slice(0, index);
+  if (/^[A-Za-z]:$/.test(parent)) return `${parent}\\`;
+  return parent;
+};
+
 const formatFileSize = (size?: number) => {
   if (!size || size <= 0) return '--';
   if (size < 1024) return `${size} B`;
@@ -211,14 +244,55 @@ const LogItem = ({ log }: { log: { message: string, type: LogType, timestamp: nu
   );
 };
 
-const MediaHistoryItem = ({ item }: { item: ScrapedMediaRecord }) => {
-  const imageUrl = item.still || item.poster;
-  const episodeCode = `S${String(item.season ?? 0).padStart(2, '0')}E${String(item.episode ?? 0).padStart(2, '0')}`;
+const MediaHistoryItem = ({
+  item,
+  onNavigate,
+  isNavigating,
+}: {
+  item: ScrapedMediaRecord;
+  onNavigate: (item: ScrapedMediaRecord) => void;
+  isNavigating: boolean;
+}) => {
+  const isMovie = (item.season ?? 0) === 0 && (item.episode ?? 0) === 0;
+  const imageUrl = isMovie ? (item.poster || item.still) : (item.still || item.poster);
+  const episodeCode = isMovie
+    ? 'Movie'
+    : `S${String(item.season ?? 0).padStart(2, '0')}E${String(item.episode ?? 0).padStart(2, '0')}`;
+  const tmdbUrl = item.tmdb_id
+    ? (
+        isMovie
+          ? `https://www.themoviedb.org/movie/${item.tmdb_id}`
+          : (
+              item.season && item.episode
+                ? `https://www.themoviedb.org/tv/${item.tmdb_id}/season/${item.season}/episode/${item.episode}`
+                : `https://www.themoviedb.org/tv/${item.tmdb_id}`
+            )
+      )
+    : null;
 
   return (
-    <article className="rounded-2xl border border-slate-200 dark:border-slate-800 bg-white/90 dark:bg-slate-900/80 shadow-sm overflow-hidden">
+    <article
+      role="button"
+      tabIndex={0}
+      onClick={() => !isNavigating && onNavigate(item)}
+      onKeyDown={(event) => {
+        if (event.key === 'Enter' || event.key === ' ') {
+          event.preventDefault();
+          if (!isNavigating) onNavigate(item);
+        }
+      }}
+      className={clsx(
+        "group rounded-2xl border bg-white/90 dark:bg-slate-900/80 shadow-sm overflow-hidden transition-all",
+        isNavigating
+          ? "border-blue-300 dark:border-blue-700 ring-1 ring-blue-300/50 dark:ring-blue-700/50"
+          : "border-slate-200 dark:border-slate-800 hover:border-blue-200 dark:hover:border-blue-800 hover:shadow-md cursor-pointer"
+      )}
+    >
       <div className="flex gap-3 p-3">
-        <div className="w-24 h-16 shrink-0 rounded-xl overflow-hidden bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 flex items-center justify-center">
+        <div className={clsx(
+          "shrink-0 rounded-xl overflow-hidden bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 flex items-center justify-center",
+          isMovie ? "w-16 h-24" : "w-24 h-16"
+        )}>
           {imageUrl ? (
             <img src={imageUrl} alt={item.episode_title || item.series_name || 'Scraped media'} className="w-full h-full object-cover" />
           ) : (
@@ -232,9 +306,35 @@ const MediaHistoryItem = ({ item }: { item: ScrapedMediaRecord }) => {
               <p className="text-[11px] font-black uppercase tracking-[0.18em] text-blue-600 dark:text-blue-400">{episodeCode}</p>
               <h3 className="text-sm font-bold text-slate-900 dark:text-slate-100 truncate">{item.series_name || '未命名剧集'}</h3>
             </div>
-            <span className="shrink-0 rounded-full bg-emerald-50 dark:bg-emerald-900/20 text-emerald-600 dark:text-emerald-400 px-2 py-1 text-[10px] font-bold">
-              已刮削
-            </span>
+            <div className="shrink-0 flex items-center gap-1.5">
+              <button
+                type="button"
+                onClick={(event) => {
+                  event.stopPropagation();
+                  navigator.clipboard.writeText(item.file_path);
+                }}
+                className="opacity-0 group-hover:opacity-100 focus-visible:opacity-100 h-7 w-7 rounded-lg border border-slate-200 dark:border-slate-700 bg-white/90 dark:bg-slate-900/90 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 transition-all flex items-center justify-center"
+                title="复制路径"
+              >
+                <Copy className="w-3.5 h-3.5" />
+              </button>
+              {tmdbUrl && (
+                <button
+                  type="button"
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    void window.ipcRenderer.invoke('system:openExternal', tmdbUrl);
+                  }}
+                  className="opacity-0 group-hover:opacity-100 focus-visible:opacity-100 h-7 w-7 rounded-lg border border-slate-200 dark:border-slate-700 bg-white/90 dark:bg-slate-900/90 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 transition-all flex items-center justify-center"
+                  title="打开 TMDB 页面"
+                >
+                  <ExternalLink className="w-3.5 h-3.5" />
+                </button>
+              )}
+              <span className="rounded-full bg-emerald-50 dark:bg-emerald-900/20 text-emerald-600 dark:text-emerald-400 px-2 py-1 text-[10px] font-bold">
+                已刮削
+              </span>
+            </div>
           </div>
 
           <p className="text-xs font-medium text-slate-600 dark:text-slate-300 truncate">
@@ -249,16 +349,11 @@ const MediaHistoryItem = ({ item }: { item: ScrapedMediaRecord }) => {
         </div>
       </div>
 
-      <button
-        type="button"
-        onClick={() => navigator.clipboard.writeText(item.file_path)}
-        className="w-full border-t border-slate-100 dark:border-slate-800 px-3 py-2 text-left transition-colors hover:bg-slate-50 dark:hover:bg-slate-800/80"
-        title="点击复制文件路径"
-      >
+      <div className="border-t border-slate-100 dark:border-slate-800 px-3 py-2">
         <div className="text-[10px] font-black uppercase tracking-[0.18em] text-slate-400">文件路径</div>
         <div className="mt-1 text-xs text-slate-600 dark:text-slate-300 truncate">{basename(item.file_path)}</div>
         <div className="mt-0.5 text-[11px] text-slate-400 truncate">{item.file_path}</div>
-      </button>
+      </div>
     </article>
   );
 };
@@ -399,6 +494,7 @@ export default function App() {
   const [downloadProgress, setDownloadProgress] = useState(0);
   const [isUpdateReady, setIsUpdateReady] = useState(false);
   const [isRefreshingHistory, setIsRefreshingHistory] = useState(false);
+  const [navigatingHistoryPath, setNavigatingHistoryPath] = useState<string | null>(null);
   const updateCheckInFlightRef = useRef(false);
 
   const refreshMedia = useCallback(async (options?: { silent?: boolean }) => {
@@ -879,23 +975,42 @@ export default function App() {
     return relativePath ? relativePath.split(/[\\/]/).filter(Boolean) : [];
   };
 
-  const loadDirectory = useCallback(async (path: string, options?: { isBack?: boolean }) => {
+  const loadDirectoryForSource = useCallback(async (
+    targetSourceType: 'local' | 'openlist',
+    path: string,
+    options?: { isBack?: boolean; silentError?: boolean },
+  ) => {
     setLoadingFiles(true);
     setFileList([]);
     setSelectedPaths(new Set());
     setLastClickedIndex(null);
 
-    if (!options?.isBack && currentPath) {
+    if (!options?.isBack && currentPath && targetSourceType === sourceType) {
       setNavHistory(prev => [...prev, currentPath]);
     }
 
-    const result = await window.ipcRenderer.invoke('explorer:list', { type: sourceType, path, config: { localPath, openListUrl, openListToken } });
-    if (result.success) { setFileList(result.data); setCurrentPath(result.currentPath); }
-    else { addLog(`无法加载目录: ${result.error}`, 'error'); }
+    const result = await window.ipcRenderer.invoke('explorer:list', {
+      type: targetSourceType,
+      path,
+      config: { localPath, openListUrl, openListToken },
+    });
+
+    if (result.success) {
+      setFileList(result.data);
+      setCurrentPath(result.currentPath);
+    } else if (!options?.silentError) {
+      addLog(`无法加载目录: ${result.error}`, 'error');
+    }
+
     setLoadingFiles(false);
+    return result;
   }, [addLog, currentPath, localPath, openListToken, openListUrl, sourceType]);
 
-  const handleSourceTypeChange = (nextType: 'local' | 'openlist') => {
+  const loadDirectory = useCallback(async (path: string, options?: { isBack?: boolean; silentError?: boolean }) => {
+    return loadDirectoryForSource(sourceType, path, options);
+  }, [loadDirectoryForSource, sourceType]);
+
+  const handleSourceTypeChange = useCallback((nextType: 'local' | 'openlist') => {
     if (nextType === sourceType) return;
 
     setConfig('sourceType', nextType);
@@ -904,7 +1019,63 @@ export default function App() {
     setFileList([]);
     setSelectedPaths(new Set());
     setLastClickedIndex(null);
-  };
+  }, [setConfig, sourceType]);
+
+  const handleOpenHistoryItem = useCallback(async (item: ScrapedMediaRecord) => {
+    const inferredSourceType = item.source_type === 'local' || item.source_type === 'openlist'
+      ? item.source_type
+      : (item.file_path.startsWith('/') ? 'openlist' : 'local');
+
+    if (inferredSourceType === 'local' && !localPath) {
+      addLog('无法从历史记录定位：本地路径未配置。', 'warn');
+      return;
+    }
+    if (inferredSourceType === 'openlist' && !openListUrl) {
+      addLog('无法从历史记录定位：OpenList 未配置。', 'warn');
+      return;
+    }
+
+    const resolvedPath = resolveHistoryPath(item.file_path, inferredSourceType, localPath);
+    setNavigatingHistoryPath(item.file_path);
+
+    try {
+      if (sourceType !== inferredSourceType) {
+        handleSourceTypeChange(inferredSourceType);
+      }
+
+      const tryDirectory = await loadDirectoryForSource(inferredSourceType, resolvedPath, { silentError: true });
+      if (tryDirectory.success) {
+        setActiveUtilityPanel(null);
+        addLog(`已从历史记录打开目录: ${resolvedPath}`, 'info');
+        return;
+      }
+
+      const parentPath = getHistoryParentPath(resolvedPath, inferredSourceType);
+      const tryParent = await loadDirectoryForSource(inferredSourceType, parentPath, { silentError: true });
+      if (!tryParent.success) {
+        addLog(`历史记录目标不可访问: ${item.file_path}`, 'warn');
+        return;
+      }
+
+      const normalizedTargetPath = resolvedPath.toLowerCase();
+      const targetFileIndex = tryParent.data.findIndex((entry) =>
+        !entry.isDir && entry.path.toLowerCase() === normalizedTargetPath,
+      );
+
+      if (targetFileIndex < 0) {
+        addLog(`历史记录中的文件已不存在: ${item.file_path}`, 'warn');
+        return;
+      }
+
+      const targetFile = tryParent.data[targetFileIndex];
+      setSelectedPaths(new Set([targetFile.path]));
+      setLastClickedIndex(targetFileIndex);
+      setActiveUtilityPanel(null);
+      addLog(`已从历史记录定位到文件: ${basename(targetFile.path)}`, 'success');
+    } finally {
+      setNavigatingHistoryPath(null);
+    }
+  }, [addLog, handleSourceTypeChange, loadDirectoryForSource, localPath, openListUrl, sourceType]);
 
   const handleGoBack = () => {
     if (navHistory.length === 0) return;
@@ -1680,7 +1851,12 @@ export default function App() {
                 </div>
               ) : (
                 media.map((item, index) => (
-                  <MediaHistoryItem key={item.id ?? `${item.file_path}-${index}`} item={item} />
+                  <MediaHistoryItem
+                    key={item.id ?? `${item.file_path}-${index}`}
+                    item={item}
+                    onNavigate={handleOpenHistoryItem}
+                    isNavigating={navigatingHistoryPath === item.file_path}
+                  />
                 ))
               )}
             </div>
