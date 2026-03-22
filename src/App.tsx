@@ -259,7 +259,15 @@ const MediaHistoryItem = ({
     ? 'Movie'
     : `S${String(item.season ?? 0).padStart(2, '0')}E${String(item.episode ?? 0).padStart(2, '0')}`;
   const tmdbUrl = item.tmdb_id
-    ? `https://www.themoviedb.org/${isMovie ? 'movie' : 'tv'}/${item.tmdb_id}`
+    ? (
+        isMovie
+          ? `https://www.themoviedb.org/movie/${item.tmdb_id}`
+          : (
+              item.season && item.episode
+                ? `https://www.themoviedb.org/tv/${item.tmdb_id}/season/${item.season}/episode/${item.episode}`
+                : `https://www.themoviedb.org/tv/${item.tmdb_id}`
+            )
+      )
     : null;
 
   return (
