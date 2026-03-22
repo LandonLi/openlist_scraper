@@ -19,7 +19,7 @@ export interface FileItem {
   path: string;
   isDir: boolean;
   size?: number;
-  mtime?: Date;
+  mtime?: string | number;
 }
 
 export interface SearchResult {
@@ -136,6 +136,8 @@ export interface OpenListListItem {
   name: string;
   is_dir: boolean;
   size?: number;
+  modified?: string;
+  created?: string;
 }
 
 export interface OpenListListResponseData {

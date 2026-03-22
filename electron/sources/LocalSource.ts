@@ -42,14 +42,9 @@ export class LocalSource implements IMediaSource {
     return Promise.all(items.map(async (item) => {
       const itemPath = path.join(fullPath, item.name);
       const relativePath = path.relative(this.rootPath, itemPath);
-      let size = 0;
-      let mtime = new Date();
-
-      if (item.isFile()) {
-        const stats = await fs.stat(itemPath);
-        size = stats.size;
-        mtime = stats.mtime;
-      }
+      const stats = await fs.stat(itemPath);
+      const size = item.isFile() ? stats.size : 0;
+      const mtime = stats.mtime.toISOString();
 
       return {
         name: item.name,
