@@ -138,6 +138,7 @@ export interface ScannerRequireConfirmationPayload {
   detectedName: string;
   results: SearchResult[];
   searchMode: MediaSearchMode;
+  notice?: string;
 }
 
 export interface ScannerConfirmResponsePayload {

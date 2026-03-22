@@ -36,6 +36,7 @@ type WizardState = {
   detectedName?: string;
   seriesResults?: SearchResult[];
   searchMode?: MediaSearchMode;
+  notice?: string;
   seriesName?: string;
   seriesId?: string;
   matches?: EpisodeMatchItem[];
@@ -454,7 +455,12 @@ export default function App() {
       setMetadataFetched(false);
       setFetchingMetadata(false);
       setMetadataProgress({ current: 0, total: 0 });
-      setWizardData({ detectedName: data.detectedName, seriesResults: data.results, searchMode: data.searchMode });
+      setWizardData({
+        detectedName: data.detectedName,
+        seriesResults: data.results,
+        searchMode: data.searchMode,
+        notice: data.notice,
+      });
       setManualSeriesName(data.detectedName); // Initialize with detected name
       setWizardWizardStage('series');
     };
@@ -577,12 +583,12 @@ export default function App() {
     });
 
     // Set to undefined to indicate loading state (distinct from empty array which means no results)
-    setWizardData(prev => ({ ...prev, seriesResults: undefined }));
+    setWizardData(prev => ({ ...prev, seriesResults: undefined, notice: undefined }));
   };
 
   const handleSearchModeChange = (mode: MediaSearchMode) => {
     if ((wizardData.searchMode ?? 'auto') === mode) return;
-    setWizardData(prev => ({ ...prev, searchMode: mode, seriesResults: undefined }));
+    setWizardData(prev => ({ ...prev, searchMode: mode, seriesResults: undefined, notice: undefined }));
     window.ipcRenderer.send('scanner-confirm-response', {
       seriesId: null,
       searchMode: mode,
@@ -1875,6 +1881,11 @@ export default function App() {
                     </button>
                   </div>
                 </div>
+                {wizardData.notice && (
+                  <div className="bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 rounded-xl p-3 text-xs font-medium text-amber-700 dark:text-amber-300">
+                    {wizardData.notice}
+                  </div>
+                )}
                 {wizardData.seriesResults === undefined && (
                   <div className="flex flex-col items-center justify-center py-10 space-y-3 text-slate-400">
                     <RefreshCw className="w-8 h-8 animate-spin text-blue-500 opacity-50" />

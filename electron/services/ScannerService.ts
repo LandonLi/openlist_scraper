@@ -115,9 +115,7 @@ export class ScannerService {
   ): Promise<UserConfirmationResult | null> {
     if (!this.mainWindow) return null;
     return new Promise((resolve) => {
-      setTimeout(() => {
-        this.mainWindow?.webContents.send('scanner-require-confirmation', { detectedName, results, searchMode });
-      }, 200);
+      this.sendConfirmationPrompt(detectedName, results, searchMode);
       ipcMain.once('scanner-confirm-response', (_event, response: ScannerConfirmResponsePayload) => {
         const trimmedNewName = response.newName?.trim();
         const modeChanged = Boolean(response.searchMode && response.searchMode !== searchMode);
@@ -145,6 +143,22 @@ export class ScannerService {
         } : null);
       });
     });
+  }
+
+  private sendConfirmationPrompt(
+    detectedName: string,
+    results: SearchResult[],
+    searchMode: MediaSearchMode,
+    notice?: string,
+  ) {
+    setTimeout(() => {
+      this.mainWindow?.webContents.send('scanner-require-confirmation', {
+        detectedName,
+        results,
+        searchMode,
+        notice,
+      });
+    }, 100);
   }
 
   private async requestEpisodesConfirmation(
@@ -293,9 +307,10 @@ export class ScannerService {
 
       if (confirmed.id) {
         if (confirmed.mediaType === 'movie') {
-          this.log('已匹配到电影结果。当前批处理流程仅支持电视剧元数据，请切换为电视剧搜索后重试。', 'warn');
-          currentSearchMode = 'tv';
-          continue;
+          const notice = '已选择电影结果。当前执行流程仅支持电视剧元数据，请切换类型继续。';
+          this.log(notice, 'warn');
+          this.sendConfirmationPrompt(currentSearchName, results, currentSearchMode, notice);
+          return;
         }
 
         seriesInfo = { id: confirmed.id, poster: confirmed.poster };
