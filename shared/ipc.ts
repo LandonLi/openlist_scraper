@@ -93,6 +93,15 @@ export type FetchMetadataResponse = AsyncResult<{
   matches: EpisodeMatchItem[];
 }>;
 
+export interface SeriesSearchRequest {
+  query: string;
+  searchMode: MediaSearchMode;
+}
+
+export type SeriesSearchResponse = AsyncResult<{
+  results: SearchResult[];
+}>;
+
 export interface SmartIdentifyRequest {
   unmatchedFiles: EpisodeMatchItem[];
 }
@@ -154,6 +163,10 @@ export interface ScannerEpisodesConfirmResponsePayload {
   options?: BatchOptions;
   selectedIndices: number[];
   updatedMatches?: EpisodeMatchItem[];
+  seriesId?: string;
+  seriesName?: string;
+  seriesPoster?: string;
+  mediaType?: MediaType;
 }
 
 export interface RendererEventPayloadMap {
@@ -179,6 +192,7 @@ export interface WindowIpcRenderer {
   invoke(channel: 'explorer:list', request: ExplorerListRequest): Promise<ExplorerListResponse>;
   invoke(channel: 'llm:test', request: LlmTestRequest): Promise<LlmTestResponse>;
   invoke(channel: 'media:getAll'): Promise<ScrapedMediaRecord[]>;
+  invoke(channel: 'metadata:searchSeries', request: SeriesSearchRequest): Promise<SeriesSearchResponse>;
   invoke(channel: 'metadata:getEpisodeDetail', request: MetadataDetailRequest): Promise<EpisodeData | null>;
   invoke(channel: 'openlist:test', request: OpenListTestRequest): Promise<AsyncResult<Record<string, never>>>;
   invoke(channel: 'proxy:test'): Promise<AsyncResult<Record<string, never>>>;

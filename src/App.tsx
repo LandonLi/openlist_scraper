@@ -38,6 +38,8 @@ type WizardState = {
   notice?: string;
   seriesName?: string;
   seriesId?: string;
+  seriesPoster?: string;
+  seriesMediaType?: 'tv' | 'movie';
   matches?: EpisodeMatchItem[];
 };
 
@@ -453,6 +455,7 @@ export default function App() {
   const [editingMatchIndex, setEditingMatchIndex] = useState<number | null>(null);
   const [editMatchValues, setEditMatchValues] = useState({ season: 1, episode: 1 });
   const [manualSeriesName, setManualSeriesName] = useState('');
+  const [seriesReselectMode, setSeriesReselectMode] = useState(false);
 
   // Batch edit states
   const [batchEditMode, setBatchEditMode] = useState<'season' | 'episode' | null>(null);
@@ -565,6 +568,7 @@ export default function App() {
       refreshMedia();
     };
     const handleConfirmation = (data: ScannerRequireConfirmationPayload) => {
+      setSeriesReselectMode(false);
       setMetadataFetched(false);
       setFetchingMetadata(false);
       setMetadataProgress({ current: 0, total: 0 });
@@ -578,6 +582,7 @@ export default function App() {
       setWizardWizardStage('series');
     };
     const handleEpisodesConfirmation = (data: EpisodeConfirmationPayload) => {
+      setSeriesReselectMode(false);
       setMetadataFetched(false);
       setFetchingMetadata(false);
       setMetadataProgress({ current: 0, total: 0 });
@@ -585,6 +590,8 @@ export default function App() {
         ...prev,
         seriesName: data.seriesName,
         seriesId: data.matches[0]?.tmdbId,
+        seriesPoster: prev.seriesPoster,
+        seriesMediaType: prev.seriesMediaType,
         matches: data.matches
       }));
       setSelectedIndices(data.matches.map((_, i) => i));
@@ -666,7 +673,77 @@ export default function App() {
   }, [theme]);
 
   // Handlers
-  const handleConfirmSeries = (selected: SearchResult | null) => {
+  const searchSeriesResults = async (query: string, mode: MediaSearchMode) => {
+    const trimmedQuery = query.trim();
+    if (!trimmedQuery) return;
+
+    setWizardData(prev => ({
+      ...prev,
+      detectedName: trimmedQuery,
+      searchMode: mode,
+      seriesResults: undefined,
+      notice: undefined,
+    }));
+
+    try {
+      const result = await window.ipcRenderer.invoke('metadata:searchSeries', {
+        query: trimmedQuery,
+        searchMode: mode,
+      });
+
+      if (result.success) {
+        setWizardData(prev => ({
+          ...prev,
+          detectedName: trimmedQuery,
+          searchMode: mode,
+          seriesResults: result.results,
+          notice: undefined,
+        }));
+      } else {
+        setWizardData(prev => ({
+          ...prev,
+          detectedName: trimmedQuery,
+          searchMode: mode,
+          seriesResults: [],
+          notice: result.error || '搜索失败，请重试。',
+        }));
+      }
+    } catch {
+      setWizardData(prev => ({
+        ...prev,
+        detectedName: trimmedQuery,
+        searchMode: mode,
+        seriesResults: [],
+        notice: '搜索失败，请重试。',
+      }));
+    }
+  };
+
+  const handleConfirmSeries = async (selected: SearchResult | null) => {
+    if (seriesReselectMode) {
+      if (!selected?.id || !wizardData.matches) return;
+
+      const updatedMatches = wizardData.matches.map((item) => ({
+        ...item,
+        tmdbId: selected.id,
+      }));
+
+      setWizardData(prev => ({
+        ...prev,
+        seriesName: selected.title,
+        seriesId: selected.id,
+        seriesPoster: selected.poster,
+        seriesMediaType: selected.mediaType,
+        matches: updatedMatches,
+      }));
+
+      setWizardWizardStage('loading_episodes');
+      await handleFetchMetadataWithData(updatedMatches, selected.id);
+      setWizardWizardStage('episodes');
+      setSeriesReselectMode(false);
+      return;
+    }
+
     window.ipcRenderer.send('scanner-confirm-response', {
       seriesId: selected?.id ?? null,
       seriesName: selected?.title, // 添加用户确认的剧集名称
@@ -685,6 +762,11 @@ export default function App() {
   const handleManualSearch = () => {
     if (!manualSeriesName.trim()) return;
 
+    if (seriesReselectMode) {
+      void searchSeriesResults(manualSeriesName, wizardData.searchMode ?? 'auto');
+      return;
+    }
+
     // Send IPC request with new name
     window.ipcRenderer.send('scanner-confirm-response', {
       seriesId: null,
@@ -699,6 +781,17 @@ export default function App() {
   const handleSearchModeChange = (mode: MediaSearchMode) => {
     if ((wizardData.searchMode ?? 'auto') === mode) return;
     setWizardData(prev => ({ ...prev, searchMode: mode, seriesResults: undefined, notice: undefined }));
+
+    if (seriesReselectMode) {
+      const query = manualSeriesName.trim() || wizardData.detectedName || wizardData.seriesName;
+      if (query) {
+        void searchSeriesResults(query, mode);
+      } else {
+        setWizardData(prev => ({ ...prev, seriesResults: [] }));
+      }
+      return;
+    }
+
     window.ipcRenderer.send('scanner-confirm-response', {
       seriesId: null,
       searchMode: mode,
@@ -708,17 +801,49 @@ export default function App() {
   const handleConfirmEpisodes = (confirmed: boolean) => {
     if (!confirmed) {
       window.ipcRenderer.send('scanner-episodes-confirm-response', { confirmed: false, selectedIndices: [] });
+      setSeriesReselectMode(false);
       setWizardWizardStage('idle'); setWizardData({});
     } else {
       setWizardWizardStage('executing');
       setScrapeProgress({ percent: 0, message: '正在初始化操作...' });
-      window.ipcRenderer.send('scanner-episodes-confirm-response', { confirmed: true, options: batchOptions, selectedIndices: selectedIndices, updatedMatches: wizardData.matches });
+      window.ipcRenderer.send('scanner-episodes-confirm-response', {
+        confirmed: true,
+        options: batchOptions,
+        selectedIndices: selectedIndices,
+        updatedMatches: wizardData.matches,
+        seriesId: wizardData.seriesId,
+        seriesName: wizardData.seriesName,
+        seriesPoster: wizardData.seriesPoster,
+        mediaType: wizardData.seriesMediaType,
+      });
     }
+  };
+
+  const handleReopenSeriesSelection = () => {
+    if (!wizardData.matches) return;
+    setSeriesReselectMode(true);
+    setManualSeriesName(wizardData.seriesName || wizardData.detectedName || '');
+    setWizardData(prev => ({
+      ...prev,
+      detectedName: prev.seriesName || prev.detectedName,
+      searchMode: prev.searchMode ?? 'auto',
+      notice: '已返回剧名选择。你可以重新自动搜索或手动输入剧名。',
+    }));
+    setWizardWizardStage('series');
+  };
+
+  const handleCancelSeriesReselect = () => {
+    setSeriesReselectMode(false);
+    setWizardWizardStage('episodes');
   };
 
   const closeWizard = () => {
     if (wizardStage === 'series') {
-      window.ipcRenderer.send('scanner-confirm-response', { seriesId: null });
+      if (seriesReselectMode) {
+        window.ipcRenderer.send('scanner-episodes-confirm-response', { confirmed: false, selectedIndices: [] });
+      } else {
+        window.ipcRenderer.send('scanner-confirm-response', { seriesId: null });
+      }
     }
     if (wizardStage === 'episodes') {
       window.ipcRenderer.send('scanner-episodes-confirm-response', { confirmed: false, selectedIndices: [] });
@@ -730,6 +855,7 @@ export default function App() {
     setMetadataFetched(false);
     setFetchingMetadata(false);
     setMetadataProgress({ current: 0, total: 0 });
+    setSeriesReselectMode(false);
 
     if (wizardStage === 'finished') {
       setScanning(false);
@@ -749,6 +875,7 @@ export default function App() {
       setMetadataFetched(false);
       setFetchingMetadata(false);
       setMetadataProgress({ current: 0, total: 0 });
+      setSeriesReselectMode(false);
       setScanning(false);
     }
   };
@@ -2099,7 +2226,15 @@ export default function App() {
                   {wizardStage === 'episodes' && (
                     <span>
                       {isMovieWorkflow ? '电影' : '剧集'}：
-                      <span className="text-blue-500 font-bold"> {wizardData.seriesName}</span> •
+                      <button
+                        type="button"
+                        onClick={handleReopenSeriesSelection}
+                        className="text-blue-500 font-bold hover:text-blue-400 underline decoration-dotted underline-offset-2 ml-1"
+                        title="点击重新选择剧名"
+                      >
+                        {wizardData.seriesName}
+                      </button>
+                      {' '}•
                       <span className="font-bold"> {selectedIndices.length}</span> 个项目
                     </span>
                   )}
@@ -2144,6 +2279,14 @@ export default function App() {
                     <button onClick={handleManualSearch} disabled={!manualSeriesName.trim()} className="bg-blue-600 hover:bg-blue-500 text-white px-4 py-2 rounded-lg text-xs font-bold transition-all shadow-lg shadow-blue-500/20 disabled:opacity-50 disabled:cursor-not-allowed">
                       重试
                     </button>
+                    {seriesReselectMode && (
+                      <button
+                        onClick={handleCancelSeriesReselect}
+                        className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 px-4 py-2 rounded-lg text-xs font-bold"
+                      >
+                        返回审查
+                      </button>
+                    )}
                   </div>
                 </div>
                 {wizardData.notice && (
@@ -2173,7 +2316,7 @@ export default function App() {
                     </div>
                   </div>
                 ))}
-                {wizardData.seriesResults && <button onClick={() => handleConfirmSeries(null)} className="w-full p-4 border-2 border-dashed rounded-xl text-sm font-bold text-slate-400">跳过并使用原文件名</button>}
+                {wizardData.seriesResults && !seriesReselectMode && <button onClick={() => handleConfirmSeries(null)} className="w-full p-4 border-2 border-dashed rounded-xl text-sm font-bold text-slate-400">跳过并使用原文件名</button>}
               </div>
             )}
             {wizardStage === 'loading_episodes' && <div className="flex-1 py-20 flex flex-col items-center justify-center space-y-4"><RefreshCw className="w-10 h-10 text-blue-500 animate-spin" /><p className="font-bold">正在获取详细信息...</p></div>}
