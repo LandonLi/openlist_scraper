@@ -1,6 +1,6 @@
 import { IMediaSource, type BatchRenameItem, type FileItem } from '../interfaces/IMediaSource';
 import { RegexEngine } from '../matchers/RegexEngine';
-import { LLMEngine } from '../matchers/LLMEngine';
+import { LLMEngine, type DirectoryResolveHints } from '../matchers/LLMEngine';
 import { IMetadataProvider, type EpisodeData, type SearchResult } from '../interfaces/IMetadataProvider';
 import { DatabaseService } from './DatabaseService';
 import { BrowserWindow, ipcMain } from 'electron';
@@ -29,6 +29,12 @@ type UserConfirmationResult = {
   confirmedName?: string;
   mediaType?: MediaType;
   searchMode?: MediaSearchMode;
+};
+
+type DirectoryResolveResult = {
+  seriesName?: string;
+  season?: number;
+  matches: Array<{ filename: string; episode: number }>;
 };
 
 export class ScannerService {
@@ -214,6 +220,92 @@ export class ScannerService {
     return results;
   }
 
+  private parseSeasonToken(value?: string): number | null {
+    if (!value) return null;
+    const normalized = value.trim();
+    if (!normalized) return null;
+
+    const tokenPatterns: RegExp[] = [
+      /^s(?:eason)?[\s._-]*0*(\d{1,2})$/i,
+      /^season[\s._-]*0*(\d{1,2})$/i,
+      /^第?\s*0*(\d{1,2})\s*季$/i,
+    ];
+
+    for (const pattern of tokenPatterns) {
+      const match = normalized.match(pattern);
+      if (match?.[1]) return parseInt(match[1], 10);
+    }
+
+    if (/^(specials?|sp|ova|oad|特别篇|特典)$/i.test(normalized)) {
+      return 0;
+    }
+
+    return null;
+  }
+
+  private isSeasonLikeName(value?: string): boolean {
+    return this.parseSeasonToken(value) !== null;
+  }
+
+  private buildDirectoryResolveHints(
+    pathApi: Pick<typeof path, 'dirname' | 'basename'>,
+    dirPath: string,
+    targetFilename?: string
+  ): DirectoryResolveHints {
+    const currentDirName = pathApi.basename(dirPath)?.trim();
+    const parentDirPath = pathApi.dirname(dirPath);
+    const parentDirName = parentDirPath && parentDirPath !== dirPath
+      ? pathApi.basename(parentDirPath)?.trim()
+      : undefined;
+
+    const seasonFromCurrent = this.parseSeasonToken(currentDirName);
+    const seasonFromParent = this.parseSeasonToken(parentDirName);
+
+    let seriesNameHint: string | undefined;
+    let seasonHint: number | undefined;
+
+    if (seasonFromCurrent !== null && parentDirName && !this.isSeasonLikeName(parentDirName)) {
+      seriesNameHint = parentDirName;
+      seasonHint = seasonFromCurrent;
+    } else if (currentDirName && !this.isSeasonLikeName(currentDirName)) {
+      seriesNameHint = currentDirName;
+    }
+
+    if (seasonHint === undefined && seasonFromParent !== null) {
+      seasonHint = seasonFromParent;
+    }
+
+    return {
+      currentDirName: currentDirName || undefined,
+      parentDirName: parentDirName || undefined,
+      seriesNameHint,
+      seasonHint,
+      targetFilename,
+    };
+  }
+
+  private sanitizeDirectoryResolveResult(
+    input: DirectoryResolveResult,
+    hints: DirectoryResolveHints
+  ): DirectoryResolveResult {
+    const sanitized = { ...input };
+    const trimmedSeriesName = sanitized.seriesName?.trim();
+
+    if (!trimmedSeriesName || this.isSeasonLikeName(trimmedSeriesName)) {
+      sanitized.seriesName = hints.seriesNameHint;
+    } else {
+      sanitized.seriesName = trimmedSeriesName;
+    }
+
+    const seasonValue = typeof sanitized.season === 'number' && Number.isFinite(sanitized.season)
+      ? Math.max(0, Math.trunc(sanitized.season))
+      : undefined;
+
+    sanitized.season = seasonValue ?? hints.seasonHint;
+
+    return sanitized;
+  }
+
   async identifySingleFile(source: IMediaSource, targetPath: string, videoExtensions: string) {
     if (this._isScanning) return;
     this._isScanning = true;
@@ -233,7 +325,9 @@ export class ScannerService {
 
       // Call LLM with directory context
       this.log('正在请求 LLM 根据目录上下文识别剧集信息...');
-      const resolveResult = await this.llmEngine.resolveDirectory(dirPath, videoFiles.map(f => f.name));
+      const dirHints = this.buildDirectoryResolveHints(pathApi, dirPath, pathApi.basename(targetPath));
+      const rawResolveResult = await this.llmEngine.resolveDirectory(dirPath, videoFiles.map(f => f.name), dirHints);
+      const resolveResult = this.sanitizeDirectoryResolveResult(rawResolveResult, dirHints);
 
       if (!resolveResult.seriesName) {
         this.log('LLM 无法识别该剧集。', 'error');
@@ -760,7 +854,9 @@ export class ScannerService {
         } else {
           // 使用 LLM 识别
           this.log(`正在尝试对目录 ${dir} (${unmatchedFiles.length} 个文件) 进行智能识别...`);
-          const dirResolve = await this.llmEngine.resolveDirectory(dir, unmatchedFiles.map(f => f.name));
+          const dirHints = this.buildDirectoryResolveHints(path.posix, dir);
+          const rawDirResolve = await this.llmEngine.resolveDirectory(dir, unmatchedFiles.map(f => f.name), dirHints);
+          const dirResolve = this.sanitizeDirectoryResolveResult(rawDirResolve, dirHints);
 
           if (dirResolve.seriesName) {
             for (const unmatched of unmatchedFiles) {

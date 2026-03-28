@@ -3,6 +3,14 @@ import { ILLMProvider } from '../interfaces/ILLMProvider';
 import path from 'path';
 import type { EpisodeData } from '../interfaces/IMetadataProvider';
 
+export interface DirectoryResolveHints {
+  currentDirName?: string;
+  parentDirName?: string;
+  seriesNameHint?: string;
+  seasonHint?: number;
+  targetFilename?: string;
+}
+
 export class LLMEngine implements IMatcher {
   private llm: ILLMProvider;
 
@@ -50,13 +58,33 @@ export class LLMEngine implements IMatcher {
     }
   }
 
-  async resolveDirectory(dirPath: string, filenames: string[]): Promise<{ seriesName?: string, season?: number, matches: Array<{ filename: string, episode: number }> }> {
+  async resolveDirectory(
+    dirPath: string,
+    filenames: string[],
+    hints?: DirectoryResolveHints
+  ): Promise<{ seriesName?: string, season?: number, matches: Array<{ filename: string, episode: number }> }> {
+    const hintSection = hints ? `
+      Additional Hints:
+      - Current Directory Name: "${hints.currentDirName ?? ''}"
+      - Parent Directory Name: "${hints.parentDirName ?? ''}"
+      - Series Name Hint: "${hints.seriesNameHint ?? ''}"
+      - Season Hint: ${hints.seasonHint ?? 'unknown'}
+      - Target Filename: "${hints.targetFilename ?? ''}"
+    ` : '';
+
     const prompt = `
       Analyze the following directory path and its video files to identify the TV series and match each file to an episode number.
       
       Directory Path: "${dirPath}"
       Files:
       ${filenames.map(f => `- ${f}`).join('\n')}
+      ${hintSection}
+
+      Important rules:
+      - "seriesName" must be the show title, not a season token.
+      - Never use values like "S01", "S1", "Season 1", "第1季", "Specials", "SP", "OVA" as "seriesName".
+      - If the current directory is a season folder, prefer parent directory (or provided Series Name Hint) as the "seriesName".
+      - If a valid season hint is provided, prefer it for "season".
       
       Return a JSON object with this exact structure:
       {
@@ -69,7 +97,7 @@ export class LLMEngine implements IMatcher {
     `;
 
     try {
-      this.logDebug(`[ResolveDirectory] Prompting for ${dirPath}`, { filenames });
+      this.logDebug(`[ResolveDirectory] Prompting for ${dirPath}`, { filenames, hints });
       const result = await this.llm.generateJson<{
         seriesName?: string;
         season?: number;
