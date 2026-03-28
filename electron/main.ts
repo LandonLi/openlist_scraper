@@ -12,6 +12,7 @@ import type {
   OpenListTestRequest,
   ScanSelectedRequest,
   ScanSourceRequest,
+  SeriesSearchRequest,
   SmartIdentifyRequest,
 } from '../shared/ipc';
 import type {
@@ -346,6 +347,19 @@ function registerIpcHandlers() {
   ipcMain.handle('media:getAll', () => dbService.getAllMedia());
   ipcMain.handle('metadata:getEpisodeDetail', async (_, { showId, season, episode }) => {
     return await metadataProvider.getEpisodeDetails(showId, season, episode);
+  });
+
+  ipcMain.handle('metadata:searchSeries', async (_, { query, searchMode }: SeriesSearchRequest) => {
+    try {
+      const trimmed = query?.trim();
+      if (!trimmed) {
+        return { success: true, results: [] };
+      }
+      const results = await metadataProvider.search(trimmed, searchMode);
+      return { success: true, results };
+    } catch (error) {
+      return toErrorResponse(error, '剧名搜索失败');
+    }
   });
 
   ipcMain.handle('app:getVersion', () => app.getVersion());

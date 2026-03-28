@@ -535,17 +535,24 @@ export class ScannerService {
       }
     }
 
-    const { confirmed, options, selectedIndices, updatedMatches } =
+    const { confirmed, options, selectedIndices, updatedMatches, seriesId, seriesName: overrideSeriesName, seriesPoster, mediaType: overrideMediaType } =
       await this.requestEpisodesConfirmation(confirmedSeriesName, matchedItems);
     if (this.cancelRequested) return;
     if (confirmed && selectedIndices.length > 0) {
+      const finalSeriesName = overrideSeriesName?.trim() || confirmedSeriesName;
+      const finalSeriesInfo: CachedSeriesInfo = {
+        ...seriesInfo,
+        id: seriesId || seriesInfo.id,
+        poster: seriesPoster ?? seriesInfo.poster,
+        mediaType: overrideMediaType ?? seriesInfo.mediaType,
+      };
       await this.executeBatch(
         source,
-        confirmedSeriesName,
+        finalSeriesName,
         updatedMatches || matchedItems,
         selectedIndices,
         options ?? { rename: true, writeNfo: true, writePoster: true, writeStill: true },
-        seriesInfo,
+        finalSeriesInfo,
       );
     }
   }
